@@ -528,7 +528,9 @@ function App() {
     rSun: 0.45,
     demand: 1.2,
     phEq: 8.0,
-    phK: 0.55
+    phK: 0.55,
+    chartDaysBack: 21,
+    chartDaysFwd: 7
   });
   const [measurements, setMeasurements] = useState([]);
   const [doses, setDoses] = useState([]);
@@ -593,7 +595,7 @@ function App() {
     const sorted = [...measurements].sort((a, b) => a.date.localeCompare(b.date));
     const start = new Date(sorted[0].date);
     const lastData = new Date(sorted[sorted.length - 1].date);
-    const end = new Date(Math.max(lastData.getTime(), Date.now()) + 7 * MS_DAY);
+    const end = new Date(Math.max(lastData.getTime(), Date.now() + (config.chartDaysFwd || 7) * MS_DAY));
     const measBy = {};
     sorted.forEach(m => {
       measBy[m.date] = m;
@@ -668,6 +670,21 @@ function App() {
     const p = series.filter(s => !s._future);
     return p.length ? p[p.length - 1] : null;
   }, [series]);
+
+  // Chart display window: [today - chartDaysBack, today + chartDaysFwd], clamped to available data.
+  const chartSeries = useMemo(() => {
+    if (!series.length) return series;
+    const back = config.chartDaysBack === "" ? 21 : Number(config.chartDaysBack);
+    const fwd = config.chartDaysFwd === "" ? 7 : Number(config.chartDaysFwd);
+    const now = Date.now();
+    const lo = now - back * MS_DAY,
+      hi = now + fwd * MS_DAY;
+    const win = series.filter(s => {
+      const t = new Date(s.date).getTime();
+      return t >= lo && t <= hi;
+    });
+    return win.length ? win : series; // fall back to full if window misses all data
+  }, [series, config.chartDaysBack, config.chartDaysFwd]);
   const fcZeroDay = useMemo(() => {
     const idx = series.findIndex(s => !s._future);
     if (idx < 0) return null;
@@ -774,11 +791,13 @@ function App() {
     }
   }, t[0].toUpperCase() + t.slice(1)))), tab === "dashboard" && /*#__PURE__*/React.createElement(Dashboard, {
     series,
+    chartSeries,
     latest,
     focus,
     setFocus,
     fcZeroDay,
-    recs
+    recs,
+    config
   }), tab === "log" && /*#__PURE__*/React.createElement(LogTab, {
     measurements,
     setMeasurements,
@@ -803,14 +822,16 @@ function App() {
 }
 function Dashboard({
   series,
+  chartSeries,
   latest,
   focus,
   setFocus,
   fcZeroDay,
-  recs
+  recs,
+  config
 }) {
   const p = PARAMS.find(x => x.key === focus);
-  const measuredPts = series.filter(s => s._meas && s._meas[focus]);
+  const measuredPts = chartSeries.filter(s => s._meas && s._meas[focus]);
   return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     style: S.cards
   }, PARAMS.map(par => {
@@ -892,7 +913,7 @@ function Dashboard({
     width: "100%",
     height: 300
   }, /*#__PURE__*/React.createElement(LineChart, {
-    data: series,
+    data: chartSeries,
     margin: {
       top: 8,
       right: 16,
@@ -939,7 +960,7 @@ function Dashboard({
     isAnimationActive: false
   }))), /*#__PURE__*/React.createElement("div", {
     style: S.todayNote
-  }, measuredPts.length, " measured point", measuredPts.length !== 1 ? "s" : "", " \xB7 everything else modeled forward to a 7-day forecast")));
+  }, measuredPts.length, " measured point", measuredPts.length !== 1 ? "s" : "", " in view \xB7 window: ", config.chartDaysBack === "" ? 21 : config.chartDaysBack, " days back to ", config.chartDaysFwd === "" ? 7 : config.chartDaysFwd, " days ahead (adjustable in Settings)")));
 }
 function SmartDot({
   cx,
@@ -1209,7 +1230,7 @@ function Settings({
     ...config,
     [k]: v === "" ? "" : Number(v)
   });
-  const rows = [["volume", "Pool volume (gal)", 1], ["temp", "Default water temp (°F)", 1], ["rSun", "Sun loss rate (frac/day)", 0.01], ["demand", "Demand fallback (ppm/day)", 0.1], ["phEq", "pH equilibrium", 0.1], ["phK", "pH drift speed", 0.05]];
+  const rows = [["volume", "Pool volume (gal)", 1], ["temp", "Default water temp (°F)", 1], ["rSun", "Sun loss rate (frac/day)", 0.01], ["demand", "Demand fallback (ppm/day)", 0.1], ["phEq", "pH equilibrium", 0.1], ["phK", "pH drift speed", 0.05], ["chartDaysBack", "Chart range: days back", 1], ["chartDaysFwd", "Chart range: days forward", 1]];
   return /*#__PURE__*/React.createElement("div", {
     style: S.settings
   }, /*#__PURE__*/React.createElement("h3", {
