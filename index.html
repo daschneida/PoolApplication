@@ -21,6 +21,24 @@
 </head>
 <body>
 <div id="root"></div>
+<script>
+/* ============================================================
+   CROSS-DEVICE SYNC SETTINGS  —  EDIT THESE THREE VALUES
+   Fill in all three to turn on cloud sync across your devices.
+   Leave them as empty quotes "" to keep local (per-browser) storage.
+   See the README "Cross-device sync setup" section for the 5-min walkthrough.
+
+   POOL_ID is your PRIVATE access key: invent a long random string.
+   Anyone who has it can read your pool data, so keep it secret and
+   make it hard to guess (e.g. mash 30+ random letters and numbers).
+   ============================================================ */
+window.POOL_CONFIG = {
+  SUPABASE_URL: "",
+  SUPABASE_ANON_KEY: "",
+  POOL_ID: ""
+};
+</script>
+
 
 
 
@@ -521,6 +539,53 @@ function driftPH(ph, eq, k) {
   return ph == null ? null : ph + (eq - ph) * (1 - Math.exp(-k));
 }
 const LS_KEY = "pool_chem_webapp_v1";
+
+/* ============================================================
+   SUPABASE CROSS-DEVICE SYNC  (optional)
+   To turn on cloud sync across all your devices, fill in these
+   three values. Leave them blank to keep using local (per-browser)
+   storage only. See the README for the 5-minute setup.
+   - SUPABASE_URL : your project URL (https://xxxx.supabase.co)
+   - SUPABASE_ANON_KEY : the project's public "anon" key
+   - POOL_ID : any long hard-to-guess string YOU invent. This is
+     your private access key — anyone with it can see your data,
+     so make it long and random and don't share it publicly.
+   ============================================================ */
+const SUPABASE_URL = typeof window !== "undefined" && window.POOL_CONFIG && window.POOL_CONFIG.SUPABASE_URL || "";
+const SUPABASE_ANON_KEY = typeof window !== "undefined" && window.POOL_CONFIG && window.POOL_CONFIG.SUPABASE_ANON_KEY || "";
+const POOL_ID = typeof window !== "undefined" && window.POOL_CONFIG && window.POOL_CONFIG.POOL_ID || "";
+const SYNC_ON = !!(SUPABASE_URL && SUPABASE_ANON_KEY && POOL_ID);
+
+// REST helpers — single row per pool, holding the whole state blob in a JSON column.
+async function sbLoad() {
+  const r = await fetch(`${SUPABASE_URL}/rest/v1/pool_state?pool_id=eq.${encodeURIComponent(POOL_ID)}&select=data`, {
+    headers: {
+      apikey: SUPABASE_ANON_KEY,
+      Authorization: `Bearer ${SUPABASE_ANON_KEY}`
+    }
+  });
+  if (!r.ok) throw new Error("load " + r.status);
+  const rows = await r.json();
+  return rows.length ? rows[0].data : null;
+}
+async function sbSave(state) {
+  // upsert on pool_id
+  const r = await fetch(`${SUPABASE_URL}/rest/v1/pool_state?on_conflict=pool_id`, {
+    method: "POST",
+    headers: {
+      apikey: SUPABASE_ANON_KEY,
+      Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+      "Content-Type": "application/json",
+      Prefer: "resolution=merge-duplicates"
+    },
+    body: JSON.stringify({
+      pool_id: POOL_ID,
+      data: state,
+      updated_at: new Date().toISOString()
+    })
+  });
+  if (!r.ok) throw new Error("save " + r.status);
+}
 function App() {
   const [config, setConfig] = useState({
     volume: 19000,
@@ -537,38 +602,84 @@ function App() {
   const [loaded, setLoaded] = useState(false);
   const [tab, setTab] = useState("dashboard");
   const [focus, setFocus] = useState("fc");
+  const [syncStatus, setSyncStatus] = useState(SYNC_ON ? "connecting" : "local");
 
-  // load from localStorage, else seed with spreadsheet data
+  // load: try Supabase first (if configured), fall back to localStorage, then seed
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem(LS_KEY);
-      if (raw) {
-        const d = JSON.parse(raw);
-        if (d.config) setConfig(c => ({
-          ...c,
-          ...d.config
-        }));
-        setMeasurements(d.measurements || []);
-        setDoses(d.doses || []);
-      } else {
+    (async () => {
+      // local cache first so the UI isn't empty while the network call runs
+      let usedLocal = false;
+      try {
+        const raw = localStorage.getItem(LS_KEY);
+        if (raw) {
+          const d = JSON.parse(raw);
+          if (d.config) setConfig(c => ({
+            ...c,
+            ...d.config
+          }));
+          setMeasurements(d.measurements || []);
+          setDoses(d.doses || []);
+          usedLocal = true;
+        }
+      } catch (e) {}
+      if (SYNC_ON) {
+        try {
+          const cloud = await sbLoad();
+          if (cloud) {
+            if (cloud.config) setConfig(c => ({
+              ...c,
+              ...cloud.config
+            }));
+            setMeasurements(cloud.measurements || []);
+            setDoses(cloud.doses || []);
+            setSyncStatus("synced");
+          } else {
+            // first time on this pool ID: seed cloud from local or spreadsheet
+            const seedM = usedLocal ? undefined : SEED.measurements;
+            const seedD = usedLocal ? undefined : SEED.doses;
+            if (!usedLocal) {
+              setMeasurements(SEED.measurements);
+              setDoses(SEED.doses);
+            }
+            setSyncStatus("synced");
+          }
+        } catch (e) {
+          setSyncStatus("offline");
+          if (!usedLocal) {
+            setMeasurements(SEED.measurements);
+            setDoses(SEED.doses);
+          }
+        }
+      } else if (!usedLocal) {
         setMeasurements(SEED.measurements);
         setDoses(SEED.doses);
       }
-    } catch (e) {
-      setMeasurements(SEED.measurements);
-      setDoses(SEED.doses);
-    }
-    setLoaded(true);
+      setLoaded(true);
+    })();
   }, []);
+
+  // save: always cache locally; if sync on, also push to Supabase (debounced)
   useEffect(() => {
     if (!loaded) return;
+    const state = {
+      config,
+      measurements,
+      doses
+    };
     try {
-      localStorage.setItem(LS_KEY, JSON.stringify({
-        config,
-        measurements,
-        doses
-      }));
+      localStorage.setItem(LS_KEY, JSON.stringify(state));
     } catch (e) {}
+    if (SYNC_ON) {
+      const id = setTimeout(async () => {
+        try {
+          await sbSave(state);
+          setSyncStatus("synced");
+        } catch (e) {
+          setSyncStatus("offline");
+        }
+      }, 800);
+      return () => clearTimeout(id);
+    }
   }, [config, measurements, doses, loaded]);
   const learned = useMemo(() => {
     const ms = measurements.filter(m => m.fc != null).sort((a, b) => a.date.localeCompare(b.date));
@@ -777,10 +888,18 @@ function App() {
     style: S.calibVal
   }, fmt(effDemand), " ppm/day"), /*#__PURE__*/React.createElement("span", {
     style: S.calibNote
-  }, learned ? `learned from ${learned.n} intervals` : "model default")), /*#__PURE__*/React.createElement("button", {
+  }, learned ? `learned from ${learned.n} intervals` : "model default")), /*#__PURE__*/React.createElement("div", {
+    style: S.syncCol
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      ...S.syncBadge,
+      background: syncStatus === "synced" ? "#e7f3ec" : syncStatus === "offline" ? "#fbeceb" : syncStatus === "connecting" ? "#f4f6fa" : "#f1efe8",
+      color: syncStatus === "synced" ? "#2c7a4b" : syncStatus === "offline" ? "#b23b39" : syncStatus === "connecting" ? "#2f5080" : "#6a6860"
+    }
+  }, syncStatus === "synced" ? "● cloud synced" : syncStatus === "offline" ? "● offline (cached)" : syncStatus === "connecting" ? "○ connecting…" : "○ local only"), /*#__PURE__*/React.createElement("button", {
     onClick: exportCSV,
     style: S.exportBtn
-  }, "\u2193 Export CSV"))), /*#__PURE__*/React.createElement("nav", {
+  }, "\u2193 Export CSV")))), /*#__PURE__*/React.createElement("nav", {
     style: S.tabs
   }, ["dashboard", "log", "settings"].map(t => /*#__PURE__*/React.createElement("button", {
     key: t,
@@ -818,7 +937,7 @@ function App() {
     }
   }), /*#__PURE__*/React.createElement("footer", {
     style: S.footer
-  }, "FC loss = (sun ", fmt(config.rSun * 100, 0), "%/day \xD7 current FC) + demand (", fmt(effDemand), " ppm/day). Additive coefficients & CSI equation from your spreadsheet. Data saved in this browser; use Export CSV to back it up."));
+  }, "FC loss = (sun ", fmt(config.rSun * 100, 0), "%/day \xD7 current FC) + demand (", fmt(effDemand), " ppm/day). Additive coefficients & CSI equation from your spreadsheet. ", SYNC_ON ? "Synced across your devices via Supabase; Export CSV for an extra backup." : "Data saved in this browser; use Export CSV to back it up."));
 }
 function Dashboard({
   series,
@@ -1298,6 +1417,19 @@ const S = {
     display: "flex",
     alignItems: "flex-end",
     gap: 14
+  },
+  syncCol: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "flex-end",
+    gap: 6
+  },
+  syncBadge: {
+    fontSize: 11,
+    fontFamily: "ui-monospace,monospace",
+    padding: "3px 9px",
+    borderRadius: 20,
+    whiteSpace: "nowrap"
   },
   calib: {
     textAlign: "right",
