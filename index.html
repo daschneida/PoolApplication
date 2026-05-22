@@ -595,7 +595,19 @@ function App() {
     phEq: 8.0,
     phK: 0.55,
     chartDaysBack: 21,
-    chartDaysFwd: 7
+    chartDaysFwd: 7,
+    fcLo: 2,
+    fcHi: 6,
+    phLo: 7.4,
+    phHi: 7.8,
+    cyaLo: 40,
+    cyaHi: 60,
+    taLo: 80,
+    taHi: 120,
+    chLo: 200,
+    chHi: 400,
+    csiLo: -0.3,
+    csiHi: 0.3
   });
   const [measurements, setMeasurements] = useState([]);
   const [doses, setDoses] = useState([]);
@@ -726,8 +738,21 @@ function App() {
     const T = config.temp;
     for (let t = new Date(start); t <= end; t = new Date(t.getTime() + MS_DAY)) {
       const iso = t.toISOString().slice(0, 10);
+      // 1) natural decay/drift carries yesterday's state into today
       if (st.fc != null) st.fc = decayFC(st.fc, config.rSun, effDemand);
       if (st.ph != null) st.ph = driftPH(st.ph, config.phEq, config.phK);
+      // 2) a real measurement re-anchors the baseline for the day (overrides the model)
+      const m = measBy[iso];
+      const mf = {};
+      if (m) {
+        ["fc", "ph", "cya", "ta", "ch"].forEach(k => {
+          if (m[k] != null && m[k] !== "") {
+            st[k] = Number(m[k]);
+            mf[k] = true;
+          }
+        });
+      }
+      // 3) additives logged that day add ON TOP of the measurement/model baseline
       const td = dosesBy[iso] || [];
       let dz = {
         fc: 0,
@@ -745,20 +770,18 @@ function App() {
         dz.ph += a.pH * d.oz / config.volume;
         dz.ch += a.CH * d.oz / config.volume;
       });
-      if (st.fc != null) st.fc += dz.fc;
-      if (st.ph != null) st.ph += dz.ph;
-      if (st.cya != null) st.cya += dz.cya;
-      if (st.ta != null) st.ta += dz.ta;
-      if (st.ch != null) st.ch += dz.ch;
-      const m = measBy[iso];
-      const mf = {};
-      if (m) {
-        ["fc", "ph", "cya", "ta", "ch"].forEach(k => {
-          if (m[k] != null && m[k] !== "") {
-            st[k] = Number(m[k]);
-            mf[k] = true;
-          }
-        });
+      if (td.length) {
+        // initialize any null channel from the day's measurement so a dose has something to add to
+        if (st.fc == null && dz.fc) st.fc = 0;
+        if (st.ph == null && dz.ph) st.ph = 0;
+        if (st.cya == null && dz.cya) st.cya = 0;
+        if (st.ta == null && dz.ta) st.ta = 0;
+        if (st.ch == null && dz.ch) st.ch = 0;
+        if (st.fc != null) st.fc += dz.fc;
+        if (st.ph != null) st.ph += dz.ph;
+        if (st.cya != null) st.cya += dz.cya;
+        if (st.ta != null) st.ta += dz.ta;
+        if (st.ch != null) st.ch += dz.ch;
       }
       const future = t.getTime() > Date.now() + MS_DAY / 2;
       const cv = csi(st.ph, st.ch, st.ta, st.cya, m?.temp ?? T);
@@ -777,9 +800,16 @@ function App() {
     }
     return out;
   }, [measurements, doses, config, effDemand]);
+
+  // "latest" = the current day's row (today), which now includes any measurement + additive
+  // contributions applied for today. If today is beyond the series, fall back to the last row.
   const latest = useMemo(() => {
-    const p = series.filter(s => !s._future);
-    return p.length ? p[p.length - 1] : null;
+    if (!series.length) return null;
+    const todayIso = new Date().toISOString().slice(0, 10);
+    const todayRow = series.find(s => s.date === todayIso);
+    if (todayRow) return todayRow;
+    const past = series.filter(s => !s._future);
+    return past.length ? past[past.length - 1] : series[series.length - 1];
   }, [series]);
 
   // Chart display window: [today - chartDaysBack, today + chartDaysFwd], clamped to available data.
@@ -812,25 +842,37 @@ function App() {
   const recs = useMemo(() => {
     if (!latest) return [];
     const r = [];
-    const fcT = latest.cya != null ? Math.max(3, latest.cya * 0.075) : 4;
-    if (latest.fc != null && latest.fc < fcT) {
-      const oz = (fcT - latest.fc) * config.volume / ADDITIVES["NaOCl (10.5 wt%)"].Cl;
+    const mid = (loK, hiK, dlo, dhi) => {
+      const lo = config[loK],
+        hi = config[hiK];
+      const L = lo === "" || lo == null || isNaN(lo) ? dlo : Number(lo),
+        H = hi === "" || hi == null || isNaN(hi) ? dhi : Number(hi);
+      return (L + H) / 2;
+    };
+    // Chlorine: aim for the midpoint of the FC target range. Note the 14%-of-CYA guideline.
+    const fcMid = mid("fcLo", "fcHi", 2, 6);
+    if (latest.fc != null && latest.fc < fcMid) {
+      const oz = (fcMid - latest.fc) * config.volume / ADDITIVES["NaOCl (10.5 wt%)"].Cl;
+      const cyaNote = latest.cya != null ? ` (14% of CYA ≈ ${fmt(latest.cya * 0.14)} ppm)` : "";
       r.push({
         chem: "NaOCl (10.5 wt%)",
         oz: Math.round(oz),
-        reason: `raise FC to ${fmt(fcT)} ppm (7.5% of CYA)`
+        reason: `raise FC to ${fmt(fcMid)} ppm${cyaNote}`
       });
     }
-    if (latest.ph != null && latest.ph > 7.8) {
-      const oz = (latest.ph - 7.6) * config.volume / Math.abs(ADDITIVES["Muriatic acid (14%)"].pH);
+    // pH: if above the range, bring down to the pH range midpoint with acid.
+    const phMid = mid("phLo", "phHi", 7.4, 7.8);
+    const phHi = config.phHi === "" || config.phHi == null || isNaN(config.phHi) ? 7.8 : Number(config.phHi);
+    if (latest.ph != null && latest.ph > phHi) {
+      const oz = (latest.ph - phMid) * config.volume / Math.abs(ADDITIVES["Muriatic acid (14%)"].pH);
       r.push({
         chem: "Muriatic acid (14%)",
         oz: Math.round(oz),
-        reason: `lower pH from ${fmt(latest.ph, 2)} to 7.6`
+        reason: `lower pH from ${fmt(latest.ph, 2)} to ${fmt(phMid, 2)}`
       });
     }
     return r;
-  }, [latest, config.volume]);
+  }, [latest, config]);
   function exportCSV() {
     const lines = [];
     lines.push("# POOL CHEMISTRY EXPORT  generated " + new Date().toISOString());
@@ -927,6 +969,7 @@ function App() {
     config,
     setConfig,
     learned,
+    latestCya: latest ? latest.cya : null,
     onReset: () => {
       setMeasurements([]);
       setDoses([]);
@@ -951,11 +994,23 @@ function Dashboard({
 }) {
   const p = PARAMS.find(x => x.key === focus);
   const measuredPts = chartSeries.filter(s => s._meas && s._meas[focus]);
+  // target ranges come from Settings (config), falling back to PARAMS defaults
+  const rangeOf = key => {
+    const lo = config[key + "Lo"],
+      hi = config[key + "Hi"];
+    const def = PARAMS.find(x => x.key === key);
+    return {
+      lo: lo === "" || lo == null || isNaN(lo) ? def.lo : Number(lo),
+      hi: hi === "" || hi == null || isNaN(hi) ? def.hi : Number(hi)
+    };
+  };
+  const pRange = rangeOf(focus);
   return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     style: S.cards
   }, PARAMS.map(par => {
     const v = latest ? latest[par.key] : null;
-    const inR = v != null && v >= par.lo && v <= par.hi;
+    const rg = rangeOf(par.key);
+    const inR = v != null && v >= rg.lo && v <= rg.hi;
     return /*#__PURE__*/React.createElement("button", {
       key: par.key,
       onClick: () => setFocus(par.key),
@@ -981,7 +1036,7 @@ function Dashboard({
         background: inR ? "#e7f3ec" : "#fbeceb",
         color: inR ? "#2c7a4b" : "#b23b39"
       }
-    }, v == null ? "no data" : inR ? "in range" : v < par.lo ? "low" : "high"));
+    }, v == null ? "no data" : inR ? "in range" : v < rg.lo ? "low" : "high"));
   })), /*#__PURE__*/React.createElement("div", {
     className: "two-col",
     style: S.insightRow
@@ -997,7 +1052,7 @@ function Dashboard({
     style: S.insightK
   }, "Water balance (CSI)"), /*#__PURE__*/React.createElement("div", {
     style: S.insightV
-  }, latest?.csi == null ? "Need all 5 inputs to compute" : latest.csi < -0.3 ? /*#__PURE__*/React.createElement("span", null, "Corrosive (", fmt(latest.csi, 2), ") \u2014 raise pH/alkalinity/calcium") : latest.csi > 0.3 ? /*#__PURE__*/React.createElement("span", null, "Scaling (", fmt(latest.csi, 2), ") \u2014 lower pH/alkalinity") : /*#__PURE__*/React.createElement("span", null, "Balanced (", fmt(latest.csi, 2), ") \u2713")))), recs.length > 0 && /*#__PURE__*/React.createElement("div", {
+  }, latest?.csi == null ? "Need all 5 inputs to compute" : latest.csi < rangeOf("csi").lo ? /*#__PURE__*/React.createElement("span", null, "Corrosive (", fmt(latest.csi, 2), ") \u2014 raise pH/alkalinity/calcium") : latest.csi > rangeOf("csi").hi ? /*#__PURE__*/React.createElement("span", null, "Scaling (", fmt(latest.csi, 2), ") \u2014 lower pH/alkalinity") : /*#__PURE__*/React.createElement("span", null, "Balanced (", fmt(latest.csi, 2), ") \u2713")))), recs.length > 0 && /*#__PURE__*/React.createElement("div", {
     style: S.recBox
   }, /*#__PURE__*/React.createElement("div", {
     style: S.recTitle
@@ -1061,9 +1116,9 @@ function Dashboard({
     content: /*#__PURE__*/React.createElement(ChemTooltip, {
       param: p
     })
-  }), p.lo != null && /*#__PURE__*/React.createElement(ReferenceArea, {
-    y1: p.lo,
-    y2: p.hi,
+  }), /*#__PURE__*/React.createElement(ReferenceArea, {
+    y1: pRange.lo,
+    y2: pRange.hi,
     fill: p.color,
     fillOpacity: 0.07
   }), /*#__PURE__*/React.createElement(Line, {
@@ -1342,6 +1397,7 @@ function Settings({
   config,
   setConfig,
   learned,
+  latestCya,
   onReset,
   onReseed
 }) {
@@ -1350,6 +1406,19 @@ function Settings({
     [k]: v === "" ? "" : Number(v)
   });
   const rows = [["volume", "Pool volume (gal)", 1], ["temp", "Default water temp (°F)", 1], ["rSun", "Sun loss rate (frac/day)", 0.01], ["demand", "Demand fallback (ppm/day)", 0.1], ["phEq", "pH equilibrium", 0.1], ["phK", "pH drift speed", 0.05], ["chartDaysBack", "Chart range: days back", 1], ["chartDaysFwd", "Chart range: days forward", 1]];
+  const targets = [["Free chlorine (ppm)", "fcLo", "fcHi", 0.5], ["pH", "phLo", "phHi", 0.1], ["Cyanuric acid (ppm)", "cyaLo", "cyaHi", 5], ["Calcium hardness (ppm)", "chLo", "chHi", 10], ["Alkalinity (ppm)", "taLo", "taHi", 10], ["Saturation index (CSI)", "csiLo", "csiHi", 0.1]];
+  const canSuggest = latestCya != null && !isNaN(latestCya) && latestCya > 0;
+  const suggestFC = () => {
+    if (!canSuggest) return;
+    // FC band: 12%-16% of CYA, target 14% sits in the middle. Round to 0.5.
+    const lo = Math.round(latestCya * 0.12 * 2) / 2;
+    const hi = Math.round(latestCya * 0.16 * 2) / 2;
+    setConfig({
+      ...config,
+      fcLo: lo,
+      fcHi: hi
+    });
+  };
   return /*#__PURE__*/React.createElement("div", {
     style: S.settings
   }, /*#__PURE__*/React.createElement("h3", {
@@ -1370,7 +1439,48 @@ function Settings({
     value: config[k],
     onChange: e => upd(k, e.target.value),
     style: S.input
-  })))), /*#__PURE__*/React.createElement("div", {
+  })))), /*#__PURE__*/React.createElement("h4", {
+    style: S.subH
+  }, "Target ranges"), /*#__PURE__*/React.createElement("p", {
+    style: S.logHint
+  }, "The low/high values used on the dashboard to flag each reading as low, in range, or high, and to draw the shaded band on the chart. Chlorine dosing aims for the midpoint of the chlorine range."), /*#__PURE__*/React.createElement("div", {
+    style: S.targetGrid
+  }, targets.map(([label, loK, hiK, step]) => /*#__PURE__*/React.createElement("div", {
+    key: loK,
+    style: S.targetRow
+  }, /*#__PURE__*/React.createElement("span", {
+    style: S.targetLabel
+  }, label), /*#__PURE__*/React.createElement("div", {
+    style: S.targetInputs
+  }, /*#__PURE__*/React.createElement("input", {
+    type: "number",
+    step: step,
+    value: config[loK],
+    onChange: e => upd(loK, e.target.value),
+    style: S.inputSm,
+    "aria-label": label + " low"
+  }), /*#__PURE__*/React.createElement("span", {
+    style: S.targetDash
+  }, "to"), /*#__PURE__*/React.createElement("input", {
+    type: "number",
+    step: step,
+    value: config[hiK],
+    onChange: e => upd(hiK, e.target.value),
+    style: S.inputSm,
+    "aria-label": label + " high"
+  }))))), /*#__PURE__*/React.createElement("div", {
+    style: S.suggestRow
+  }, /*#__PURE__*/React.createElement("button", {
+    onClick: suggestFC,
+    disabled: !canSuggest,
+    style: {
+      ...S.btnGhost,
+      opacity: canSuggest ? 1 : 0.5,
+      cursor: canSuggest ? "pointer" : "default"
+    }
+  }, "Suggest chlorine range from CYA"), /*#__PURE__*/React.createElement("span", {
+    style: S.suggestNote
+  }, canSuggest ? `From CYA ${fmt(latestCya, 0)}: sets FC 12–16% of CYA (${fmt(latestCya * 0.12)}–${fmt(latestCya * 0.16)} ppm), target 14% ≈ ${fmt(latestCya * 0.14)} ppm` : "Log a CYA reading to enable a chlorine-from-CYA suggestion")), /*#__PURE__*/React.createElement("div", {
     style: S.dangerZone
   }, /*#__PURE__*/React.createElement("button", {
     onClick: onReseed,
@@ -1797,6 +1907,56 @@ const S = {
     display: "grid",
     gridTemplateColumns: "1fr 1fr",
     gap: "0 16px"
+  },
+  targetGrid: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 8,
+    marginBottom: 4
+  },
+  suggestRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: 12,
+    marginTop: 12,
+    flexWrap: "wrap"
+  },
+  suggestNote: {
+    fontSize: 12,
+    color: "#8a877e",
+    fontStyle: "italic",
+    flex: 1,
+    minWidth: 200
+  },
+  targetRow: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12
+  },
+  targetLabel: {
+    fontSize: 14,
+    color: "#4a4842"
+  },
+  targetInputs: {
+    display: "flex",
+    alignItems: "center",
+    gap: 8
+  },
+  targetDash: {
+    fontSize: 12,
+    color: "#9a9890"
+  },
+  inputSm: {
+    fontFamily: "inherit",
+    fontSize: 14,
+    padding: "6px 8px",
+    border: "1px solid #ddd9cf",
+    borderRadius: 6,
+    background: "#fcfbf7",
+    color: "#2b2a27",
+    width: 72,
+    textAlign: "center"
   },
   dangerZone: {
     display: "flex",
