@@ -513,7 +513,13 @@ const PARAMS = [{
   hi: 0.3
 }];
 const MS_DAY = 86400000;
-const todayISO = () => new Date().toISOString().slice(0, 10);
+// Local-time date string (YYYY-MM-DD). Using local avoids the UTC rollover bug where
+// evenings in US time zones read as "tomorrow" because toISOString() is UTC.
+const toLocalISO = d => {
+  const x = new Date(d);
+  return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, "0")}-${String(x.getDate()).padStart(2, "0")}`;
+};
+const todayISO = () => toLocalISO(new Date());
 const fmt = (n, d = 1) => n == null || isNaN(n) ? "—" : Number(n).toFixed(d);
 function csi(pH, CH, TA, CYA, T) {
   if ([pH, CH, TA, CYA, T].some(v => v == null || isNaN(v))) return null;
@@ -737,7 +743,7 @@ function App() {
     };
     const T = config.temp;
     for (let t = new Date(start); t <= end; t = new Date(t.getTime() + MS_DAY)) {
-      const iso = t.toISOString().slice(0, 10);
+      const iso = toLocalISO(t);
       // 1) natural decay/drift carries yesterday's state into today
       if (st.fc != null) st.fc = decayFC(st.fc, config.rSun, effDemand);
       if (st.ph != null) st.ph = driftPH(st.ph, config.phEq, config.phK);
@@ -783,7 +789,7 @@ function App() {
         if (st.ta != null) st.ta += dz.ta;
         if (st.ch != null) st.ch += dz.ch;
       }
-      const future = t.getTime() > Date.now() + MS_DAY / 2;
+      const future = iso > todayISO();
       const cv = csi(st.ph, st.ch, st.ta, st.cya, m?.temp ?? T);
       out.push({
         date: iso,
@@ -805,7 +811,7 @@ function App() {
   // contributions applied for today. If today is beyond the series, fall back to the last row.
   const latest = useMemo(() => {
     if (!series.length) return null;
-    const todayIso = new Date().toISOString().slice(0, 10);
+    const todayIso = todayISO();
     const todayRow = series.find(s => s.date === todayIso);
     if (todayRow) return todayRow;
     const past = series.filter(s => !s._future);
