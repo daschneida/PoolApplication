@@ -602,6 +602,7 @@ function App() {
     phK: 0.55,
     chartDaysBack: 21,
     chartDaysFwd: 7,
+    lossWindow: 14,
     fcLo: 2,
     fcHi: 6,
     phLo: 7.4,
@@ -701,29 +702,41 @@ function App() {
   }, [config, measurements, doses, loaded]);
   const learned = useMemo(() => {
     const ms = measurements.filter(m => m.fc != null).sort((a, b) => a.date.localeCompare(b.date));
-    let demandArr = [],
-      totalArr = [];
+    let demandArr = [];
+    // windowed totals for Option B (total chlorine lost / total days) within the loss window
+    const win = config.lossWindow === "" || config.lossWindow == null || isNaN(config.lossWindow) ? 14 : Number(config.lossWindow);
+    const cutoff = Date.now() - win * MS_DAY;
+    let sumLoss = 0,
+      sumDays = 0,
+      winIntervals = 0;
     for (let i = 1; i < ms.length; i++) {
       const days = (new Date(ms[i].date) - new Date(ms[i - 1].date)) / MS_DAY;
       if (days <= 0 || days > 21) continue;
       const dosedFC = doses.filter(d => d.date > ms[i - 1].date && d.date <= ms[i].date).reduce((s, d) => s + (ADDITIVES[d.chem]?.Cl || 0) * d.oz / config.volume, 0);
       const obsLoss = ms[i - 1].fc + dosedFC - ms[i].fc; // total chlorine lost over the interval
-      const totalPerDay = obsLoss / days; // overall ppm/day loss (sun + everything)
       const expSun = ms[i - 1].fc * config.rSun * days;
       const demandPerDay = (obsLoss - expSun) / days; // loss beyond what sun explains (feeds the model)
-      if (isFinite(totalPerDay)) totalArr.push(totalPerDay);
       if (isFinite(demandPerDay)) demandArr.push(demandPerDay);
+      // include in the windowed total if the interval's later reading is within the window
+      if (new Date(ms[i].date).getTime() >= cutoff && isFinite(obsLoss)) {
+        sumLoss += obsLoss;
+        sumDays += days;
+        winIntervals++;
+      }
     }
-    if (!totalArr.length) return null;
+    const hasWin = winIntervals > 0 && sumDays > 0;
+    const hasDemand = demandArr.length > 0;
+    if (!hasWin && !hasDemand) return null;
     return {
-      demand: Math.max(0, demandArr.reduce((a, b) => a + b, 0) / demandArr.length),
+      demand: hasDemand ? Math.max(0, demandArr.reduce((a, b) => a + b, 0) / demandArr.length) : config.demand,
       // for the decay model
-      totalLoss: Math.max(0, totalArr.reduce((a, b) => a + b, 0) / totalArr.length),
-      // for the header display
-      n: totalArr.length
+      totalLoss: hasWin ? sumLoss / sumDays : null,
+      // Option B over the window, for the header
+      n: winIntervals,
+      win
     };
-  }, [measurements, doses, config.volume, config.rSun]);
-  const effDemand = learned ? learned.demand : config.demand;
+  }, [measurements, doses, config.volume, config.rSun, config.lossWindow, config.demand]);
+  const effDemand = learned && learned.demand != null ? learned.demand : config.demand;
   const series = useMemo(() => {
     const have = measurements.filter(m => m.fc != null || m.ph != null);
     if (!have.length) return [];
@@ -940,9 +953,9 @@ function App() {
     style: S.calibLabel
   }, "Chlorine loss"), /*#__PURE__*/React.createElement("span", {
     style: S.calibVal
-  }, fmt(learned ? learned.totalLoss : effDemand), " ppm/day"), /*#__PURE__*/React.createElement("span", {
+  }, learned && learned.totalLoss != null ? fmt(learned.totalLoss) : "—", " ppm/day"), /*#__PURE__*/React.createElement("span", {
     style: S.calibNote
-  }, learned ? `measured from ${learned.n} interval${learned.n !== 1 ? "s" : ""}` : "no data yet")), /*#__PURE__*/React.createElement("div", {
+  }, learned && learned.totalLoss != null ? `last ${learned.win} days · ${learned.n} interval${learned.n !== 1 ? "s" : ""}` : `no readings in last ${config.lossWindow || 14} days`)), /*#__PURE__*/React.createElement("div", {
     style: S.syncCol
   }, /*#__PURE__*/React.createElement("span", {
     style: {
@@ -1417,7 +1430,7 @@ function Settings({
     ...config,
     [k]: v === "" ? "" : Number(v)
   });
-  const rows = [["volume", "Pool volume (gal)", 1], ["temp", "Default water temp (°F)", 1], ["rSun", "Sun loss rate (frac/day)", 0.01], ["demand", "Demand fallback (ppm/day)", 0.1], ["phEq", "pH equilibrium", 0.1], ["phK", "pH drift speed", 0.05], ["chartDaysBack", "Chart range: days back", 1], ["chartDaysFwd", "Chart range: days forward", 1]];
+  const rows = [["volume", "Pool volume (gal)", 1], ["temp", "Default water temp (°F)", 1], ["rSun", "Sun loss rate (frac/day)", 0.01], ["demand", "Demand fallback (ppm/day)", 0.1], ["phEq", "pH equilibrium", 0.1], ["phK", "pH drift speed", 0.05], ["chartDaysBack", "Chart range: days back", 1], ["chartDaysFwd", "Chart range: days forward", 1], ["lossWindow", "Chlorine loss window (days)", 1]];
   const targets = [["Free chlorine (ppm)", "fcLo", "fcHi", 0.5], ["pH", "phLo", "phHi", 0.1], ["Cyanuric acid (ppm)", "cyaLo", "cyaHi", 5], ["Calcium hardness (ppm)", "chLo", "chHi", 10], ["Alkalinity (ppm)", "taLo", "taHi", 10], ["Saturation index (CSI)", "csiLo", "csiHi", 0.1]];
   const canSuggest = latestCya != null && !isNaN(latestCya) && latestCya > 0;
   const suggestFC = () => {
