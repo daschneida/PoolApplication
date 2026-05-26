@@ -701,20 +701,26 @@ function App() {
   }, [config, measurements, doses, loaded]);
   const learned = useMemo(() => {
     const ms = measurements.filter(m => m.fc != null).sort((a, b) => a.date.localeCompare(b.date));
-    let arr = [];
+    let demandArr = [],
+      totalArr = [];
     for (let i = 1; i < ms.length; i++) {
       const days = (new Date(ms[i].date) - new Date(ms[i - 1].date)) / MS_DAY;
       if (days <= 0 || days > 21) continue;
       const dosedFC = doses.filter(d => d.date > ms[i - 1].date && d.date <= ms[i].date).reduce((s, d) => s + (ADDITIVES[d.chem]?.Cl || 0) * d.oz / config.volume, 0);
+      const obsLoss = ms[i - 1].fc + dosedFC - ms[i].fc; // total chlorine lost over the interval
+      const totalPerDay = obsLoss / days; // overall ppm/day loss (sun + everything)
       const expSun = ms[i - 1].fc * config.rSun * days;
-      const obsLoss = ms[i - 1].fc + dosedFC - ms[i].fc;
-      const perDay = (obsLoss - expSun) / days;
-      if (isFinite(perDay)) arr.push(perDay);
+      const demandPerDay = (obsLoss - expSun) / days; // loss beyond what sun explains (feeds the model)
+      if (isFinite(totalPerDay)) totalArr.push(totalPerDay);
+      if (isFinite(demandPerDay)) demandArr.push(demandPerDay);
     }
-    if (!arr.length) return null;
+    if (!totalArr.length) return null;
     return {
-      demand: Math.max(0, arr.reduce((a, b) => a + b, 0) / arr.length),
-      n: arr.length
+      demand: Math.max(0, demandArr.reduce((a, b) => a + b, 0) / demandArr.length),
+      // for the decay model
+      totalLoss: Math.max(0, totalArr.reduce((a, b) => a + b, 0) / totalArr.length),
+      // for the header display
+      n: totalArr.length
     };
   }, [measurements, doses, config.volume, config.rSun]);
   const effDemand = learned ? learned.demand : config.demand;
@@ -932,11 +938,11 @@ function App() {
     style: S.calib
   }, /*#__PURE__*/React.createElement("span", {
     style: S.calibLabel
-  }, "Chlorine demand"), /*#__PURE__*/React.createElement("span", {
+  }, "Chlorine loss"), /*#__PURE__*/React.createElement("span", {
     style: S.calibVal
-  }, fmt(effDemand), " ppm/day"), /*#__PURE__*/React.createElement("span", {
+  }, fmt(learned ? learned.totalLoss : effDemand), " ppm/day"), /*#__PURE__*/React.createElement("span", {
     style: S.calibNote
-  }, learned ? `learned from ${learned.n} intervals` : "model default")), /*#__PURE__*/React.createElement("div", {
+  }, learned ? `measured from ${learned.n} interval${learned.n !== 1 ? "s" : ""}` : "no data yet")), /*#__PURE__*/React.createElement("div", {
     style: S.syncCol
   }, /*#__PURE__*/React.createElement("span", {
     style: {
@@ -986,7 +992,7 @@ function App() {
     }
   }), /*#__PURE__*/React.createElement("footer", {
     style: S.footer
-  }, "FC loss = (sun ", fmt(config.rSun * 100, 0), "%/day \xD7 current FC) + demand (", fmt(effDemand), " ppm/day). Additive coefficients & CSI equation from your spreadsheet. ", SYNC_ON ? "Synced across your devices via Supabase; Export CSV for an extra backup." : "Data saved in this browser; use Export CSV to back it up."));
+  }, "Headline \"chlorine loss\" is your measured overall loss per day (from readings + additives). The forward forecast models it as sun (", fmt(config.rSun * 100, 0), "%/day \xD7 current FC) + demand (", fmt(effDemand), " ppm/day). Additive coefficients & CSI equation from your spreadsheet. ", SYNC_ON ? "Synced across your devices via Supabase; Export CSV for an extra backup." : "Data saved in this browser; use Export CSV to back it up."));
 }
 function Dashboard({
   series,
