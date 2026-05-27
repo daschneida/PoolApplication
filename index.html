@@ -542,6 +542,7 @@ const tsOf = e => {
 };
 // The local date string an entry belongs to (for the daily series / chart).
 const dateOf = e => e.ts ? toLocalISO(new Date(e.ts)) : e.date;
+const expSunSafe = (fc, r, days) => (fc == null || isNaN(fc) ? 0 : fc) * (r || 0) * (days || 0);
 const fmt = (n, d = 1) => n == null || isNaN(n) ? "—" : Number(n).toFixed(d);
 function csi(pH, CH, TA, CYA, T) {
   if ([pH, CH, TA, CYA, T].some(v => v == null || isNaN(v))) return null;
@@ -727,39 +728,55 @@ function App() {
     let demandArr = [];
     const win = config.lossWindow === "" || config.lossWindow == null || isNaN(config.lossWindow) ? 14 : Number(config.lossWindow);
     const cutoff = Date.now() - win * MS_DAY;
-    let sumLoss = 0,
-      sumHours = 0,
-      winIntervals = 0;
+    // --- per-interval demand (feeds the forecast model only) ---
     for (let i = 1; i < ms.length; i++) {
       const tPrev = tsOf(ms[i - 1]),
         tCur = tsOf(ms[i]);
       const hours = (tCur - tPrev) / HOUR;
-      if (!(hours > 0) || hours > 21 * 24) continue; // skip non-positive or stale (>21d) gaps
-      // Raw convention: count every dose in (prev, cur] — including a same-day dose logged
-      // after the earlier reading. Timestamp comparison fixes the old boundary-drop bug.
+      if (!(hours > 0) || hours > 21 * 24) continue;
       const dosedFC = doses.filter(d => {
         const t = tsOf(d);
         return t > tPrev && t <= tCur;
       }).reduce((s, d) => s + (ADDITIVES[d.chem]?.Cl || 0) * d.oz / config.volume, 0);
-      const obsLoss = ms[i - 1].fc + dosedFC - ms[i].fc; // total chlorine lost over the interval
+      const obsLoss = ms[i - 1].fc + dosedFC - ms[i].fc;
       const days = hours / 24;
-      const expSun = ms[i - 1].fc * config.rSun * days;
-      const demandPerDay = (obsLoss - expSun) / days; // feeds the forecast model
+      const demandPerDay = (obsLoss - expSunSafe(ms[i - 1].fc, config.rSun, days)) / days;
       if (isFinite(demandPerDay)) demandArr.push(demandPerDay);
-      if (tCur >= cutoff && isFinite(obsLoss)) {
-        sumLoss += obsLoss;
-        sumHours += hours;
-        winIntervals++;
+    }
+    // --- headline chlorine loss: SINGLE SPAN, raw convention ---
+    // Take the measurements within the window, use earliest & latest as the span endpoints,
+    // and count EVERY dose between them (inclusive). This can't drop a boundary dose the way
+    // interval-chaining did. loss = firstFC + all doses in span - lastFC, over elapsed hours.
+    const inWin = ms.filter(m => tsOf(m) >= cutoff);
+    let totalLoss = null,
+      spanDays = 0,
+      nReadings = 0;
+    if (inWin.length >= 2) {
+      const first = inWin[0],
+        last = inWin[inWin.length - 1];
+      const tA = tsOf(first),
+        tB = tsOf(last);
+      const hours = (tB - tA) / HOUR;
+      if (hours > 0) {
+        const dosed = doses.filter(d => {
+          const t = tsOf(d);
+          return t >= tA && t <= tB;
+        }).reduce((s, d) => s + (ADDITIVES[d.chem]?.Cl || 0) * d.oz / config.volume, 0);
+        const loss = first.fc + dosed - last.fc;
+        spanDays = hours / 24;
+        totalLoss = loss / spanDays;
+        nReadings = inWin.length;
       }
     }
-    const hasWin = winIntervals > 0 && sumHours > 0;
     const hasDemand = demandArr.length > 0;
-    if (!hasWin && !hasDemand) return null;
+    if (totalLoss == null && !hasDemand) return null;
     return {
       demand: hasDemand ? Math.max(0, demandArr.reduce((a, b) => a + b, 0) / demandArr.length) : config.demand,
-      totalLoss: hasWin ? sumLoss / (sumHours / 24) : null,
-      // ppm per day, from elapsed hours
-      n: winIntervals,
+      totalLoss: totalLoss,
+      // single-span raw ppm/day over the window
+      n: nReadings,
+      // number of readings spanned
+      spanDays: spanDays,
       win
     };
   }, [measurements, doses, config.volume, config.rSun, config.lossWindow, config.demand]);
@@ -986,7 +1003,7 @@ function App() {
     style: S.calibVal
   }, learned && learned.totalLoss != null ? fmt(learned.totalLoss) : "—", " ppm/day"), /*#__PURE__*/React.createElement("span", {
     style: S.calibNote
-  }, learned && learned.totalLoss != null ? `last ${learned.win} days · ${learned.n} interval${learned.n !== 1 ? "s" : ""}` : `no readings in last ${config.lossWindow || 14} days`)), /*#__PURE__*/React.createElement("div", {
+  }, learned && learned.totalLoss != null ? `over ${learned.spanDays >= 1 ? Math.round(learned.spanDays) : learned.spanDays.toFixed(1)} days · ${learned.n} readings (last ${learned.win}d window)` : `need 2+ readings in last ${config.lossWindow || 14} days`)), /*#__PURE__*/React.createElement("div", {
     style: S.syncCol
   }, /*#__PURE__*/React.createElement("span", {
     style: {
