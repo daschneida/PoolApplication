@@ -718,21 +718,21 @@ function App() {
     }
   }, [config, measurements, doses, loaded]);
   const learned = useMemo(() => {
-    const ms = measurements.filter(m => m.fc != null).slice().sort((a, b) => tsOf(a) - tsOf(b));
     const win = config.lossWindow === "" || config.lossWindow == null || isNaN(config.lossWindow) ? 14 : Number(config.lossWindow);
     const cutoff = Date.now() - win * MS_DAY;
-    // --- headline chlorine loss: SINGLE SPAN, raw convention ---
-    // Earliest & latest measurement in the window are the span endpoints; count EVERY dose
-    // between them (inclusive). loss = firstFC + all doses in span - lastFC, over elapsed hours.
-    const inWin = ms.filter(m => tsOf(m) >= cutoff);
+    const phEq = config.phEq === "" || config.phEq == null || isNaN(config.phEq) ? 8.0 : Number(config.phEq);
+
+    // ============== CHLORINE (FC) ==============
+    const fcMs = measurements.filter(m => m.fc != null).slice().sort((a, b) => tsOf(a) - tsOf(b));
+    const fcWin = fcMs.filter(m => tsOf(m) >= cutoff);
     let totalLoss = null,
       spanDays = 0,
       nReadings = 0,
       dynFrac = null,
       avgFC = null;
-    if (inWin.length >= 2) {
-      const first = inWin[0],
-        last = inWin[inWin.length - 1];
+    if (fcWin.length >= 2) {
+      const first = fcWin[0],
+        last = fcWin[fcWin.length - 1];
       const tA = tsOf(first),
         tB = tsOf(last);
       const hours = (tB - tA) / HOUR;
@@ -745,35 +745,28 @@ function App() {
         const loss = first.fc + dosed - last.fc;
         spanDays = hours / 24;
         totalLoss = loss / spanDays;
-        nReadings = inWin.length;
-
-        // --- dynamic decay fraction = loss per day / average FC the loss acted on ---
-        // Reconstruct a day-by-day FC level across the span WITHOUT using the decay fraction
-        // (so this isn't circular): start at first.fc, step day by day, add that day's doses,
-        // and glide toward the next measured anchor so the average reflects real chlorine present.
+        nReadings = fcWin.length;
+        // average FC via non-circular anchor-and-glide reconstruction
         const dayMs = MS_DAY;
-        let levels = [];
-        // map doses to day index
         const dayDose = {};
+        const anchor = {};
         spanDoses.forEach(d => {
           const k = Math.floor((tsOf(d) - tA) / dayMs);
           dayDose[k] = (dayDose[k] || 0) + (ADDITIVES[d.chem]?.Cl || 0) * d.oz / config.volume;
         });
-        // anchors: measured FC at each measurement's day index
-        const anchor = {};
-        inWin.forEach(m => {
+        fcWin.forEach(m => {
           const k = Math.round((tsOf(m) - tA) / dayMs);
           anchor[k] = m.fc;
         });
-        const totalDays = Math.max(1, Math.round(spanDays));
+        const totalDaysI = Math.max(1, Math.round(spanDays));
         let lvl = first.fc;
-        for (let k = 0; k <= totalDays; k++) {
-          if (anchor[k] != null) lvl = anchor[k]; // re-anchor to a real reading
-          if (dayDose[k]) lvl += dayDose[k]; // a dose that day raises the level
+        let levels = [];
+        for (let k = 0; k <= totalDaysI; k++) {
+          if (anchor[k] != null) lvl = anchor[k];
+          if (dayDose[k]) lvl += dayDose[k];
           levels.push(Math.max(0, lvl));
-          // glide toward the next anchor if one exists ahead (keeps interpolation realistic)
           let nextK = null;
-          for (let j = k + 1; j <= totalDays; j++) {
+          for (let j = k + 1; j <= totalDaysI; j++) {
             if (anchor[j] != null) {
               nextK = j;
               break;
@@ -790,20 +783,70 @@ function App() {
         }
       }
     }
-    if (totalLoss == null) return null;
+
+    // ============== pH DRIFT ==============
+    // Per interval between consecutive pH readings:
+    //  1) start with ms[i-1].ph, add pH shifts from any doses in (prev, cur]
+    //  2) that gives phStart (the post-dose level the drift acted on)
+    //  3) observed end is ms[i].ph; days = elapsed hours / 24
+    //  4) solve dph/dt = k*(phEq - ph) -> phEnd = phEq - (phEq-phStart)*exp(-k*days)
+    //     => k = ln((phEq-phStart)/(phEq-phEnd)) / days
+    // Skip intervals where ph never had room to drift up (phStart>=phEq) or drift overshot.
+    const phMs = measurements.filter(m => m.ph != null).slice().sort((a, b) => tsOf(a) - tsOf(b));
+    let kSamples = [],
+      phIntervals = 0;
+    for (let i = 1; i < phMs.length; i++) {
+      const tPrev = tsOf(phMs[i - 1]),
+        tCur = tsOf(phMs[i]);
+      const hours = (tCur - tPrev) / HOUR;
+      if (!(hours > 0) || hours > 21 * 24) continue;
+      if (tCur < cutoff) continue; // interval ends before the window
+      const dPh = doses.filter(d => {
+        const t = tsOf(d);
+        return t > tPrev && t <= tCur;
+      }).reduce((s, d) => s + (ADDITIVES[d.chem]?.pH || 0) * d.oz / config.volume, 0);
+      const phStart = phMs[i - 1].ph + dPh; // pH after additive shifts but before drift
+      const phEnd = phMs[i].ph;
+      const days = hours / 24;
+      // valid samples: both below equilibrium, end >= start (genuine drift up)
+      if (phStart < phEq && phEnd < phEq && phEnd >= phStart) {
+        const num = phEq - phStart,
+          den = phEq - phEnd;
+        if (num > 0 && den > 0 && days > 0) {
+          const k = Math.log(num / den) / days;
+          if (isFinite(k) && k >= 0) {
+            kSamples.push(k);
+            phIntervals++;
+          }
+        }
+      } else if (phEnd >= phEq && phStart < phEq) {
+        // saturated above equilibrium during the interval — k must be at least fast enough to reach it
+        // contribute a generous floor sample so it doesn't pull k toward zero
+        const k = Math.log((phEq - phStart) / 0.01) / days; // treat as nearly reaching phEq
+        if (isFinite(k) && k >= 0 && k < 5) {
+          kSamples.push(k);
+          phIntervals++;
+        }
+      }
+    }
+    const dynPhK = kSamples.length ? Math.max(0, Math.min(1.5, kSamples.reduce((a, b) => a + b, 0) / kSamples.length)) : null;
+    if (totalLoss == null && dynPhK == null) return null;
     return {
       totalLoss,
       n: nReadings,
       spanDays,
       win,
       frac: dynFrac,
-      // dynamic daily fraction for the forecast (null if not derivable)
-      avgFC
+      avgFC,
+      phK: dynPhK,
+      phIntervals,
+      phEq
     };
-  }, [measurements, doses, config.volume, config.lossWindow]);
+  }, [measurements, doses, config.volume, config.lossWindow, config.phEq]);
 
-  // Forecast fraction: dynamic (from measured loss) when available, else the Settings fallback.
+  // Forecast parameters: dynamic when available, else the Settings fallback.
   const effFrac = learned && learned.frac != null ? learned.frac : config.rSun || 0.45;
+  const effPhK = learned && learned.phK != null ? learned.phK : config.phK || 0.55;
   const series = useMemo(() => {
     const have = measurements.filter(m => m.fc != null || m.ph != null);
     if (!have.length) return [];
@@ -834,7 +877,7 @@ function App() {
       const iso = toLocalISO(t);
       // 1) natural decay/drift carries yesterday's state into today
       if (st.fc != null) st.fc = decayFC(st.fc, effFrac);
-      if (st.ph != null) st.ph = driftPH(st.ph, config.phEq, config.phK);
+      if (st.ph != null) st.ph = driftPH(st.ph, config.phEq, effPhK);
       // 2) a real measurement re-anchors the baseline for the day (overrides the model)
       const m = measBy[iso];
       const mf = {};
@@ -893,7 +936,7 @@ function App() {
       });
     }
     return out;
-  }, [measurements, doses, config, effFrac]);
+  }, [measurements, doses, config, effFrac, effPhK]);
 
   // "latest" = the current day's row (today), which now includes any measurement + additive
   // contributions applied for today. If today is beyond the series, fall back to the last row.
@@ -1084,7 +1127,10 @@ function App() {
     setFocus,
     forecast,
     recs,
-    config
+    config,
+    learned,
+    effFrac,
+    effPhK
   }), tab === "log" && /*#__PURE__*/React.createElement(LogTab, {
     measurements,
     setMeasurements,
@@ -1106,7 +1152,7 @@ function App() {
     }
   }), /*#__PURE__*/React.createElement("footer", {
     style: S.footer
-  }, "Headline \"chlorine loss\" is your measured overall loss per day (readings + additives, single span). The forecast decays FC by a daily fraction ", learned && learned.frac != null ? `of ${fmt(learned.frac * 100, 0)}%/day, derived from that measured loss ÷ average FC` : `(fallback ${fmt((config.rSun || 0.45) * 100, 0)}%/day until there are 2+ recent readings)`, ". Additive coefficients & CSI equation from your spreadsheet. ", SYNC_ON ? "Synced across your devices via Supabase; Export CSV for an extra backup." : "Data saved in this browser; use Export CSV to back it up."));
+  }, "FC decay: ", learned && learned.frac != null ? `dynamic ${fmt(learned.frac * 100, 0)}%/day (from measured loss ÷ avg FC)` : `fallback ${fmt((config.rSun || 0.45) * 100, 0)}%/day`, ". pH drift: ", learned && learned.phK != null ? `dynamic k=${fmt(learned.phK, 2)}/day toward ${fmt(config.phEq, 1)} (learned from your pH readings & dose history)` : `fallback k=${fmt(config.phK || 0.55, 2)}/day`, ". Additive coefficients & CSI equation from your spreadsheet. ", SYNC_ON ? "Synced across your devices via Supabase; Export CSV for an extra backup." : "Data saved in this browser; use Export CSV to back it up."));
 }
 function Dashboard({
   series,
@@ -1116,7 +1162,10 @@ function Dashboard({
   setFocus,
   forecast,
   recs,
-  config
+  config,
+  learned,
+  effFrac,
+  effPhK
 }) {
   const p = PARAMS.find(x => x.key === focus);
   const measuredPts = chartSeries.filter(s => s._meas && s._meas[focus]);
@@ -1269,7 +1318,18 @@ function Dashboard({
     isAnimationActive: false
   }))), /*#__PURE__*/React.createElement("div", {
     style: S.todayNote
-  }, measuredPts.length, " measured point", measuredPts.length !== 1 ? "s" : "", " in view \xB7 window: ", config.chartDaysBack === "" ? 21 : config.chartDaysBack, " days back to ", config.chartDaysFwd === "" ? 7 : config.chartDaysFwd, " days ahead (adjustable in Settings)")));
+  }, (() => {
+    const isDyn = focus === "fc" && learned && learned.frac != null || focus === "ph" && learned && learned.phK != null;
+    let factor = null;
+    if (focus === "fc") {
+      const pct = fmt(effFrac * 100, 0);
+      factor = isDyn ? `decay factor ${pct}%/day (dynamic, from your readings)` : `decay factor ${pct}%/day (fallback — needs 2+ recent FC readings)`;
+    } else if (focus === "ph") {
+      const k = fmt(effPhK, 2);
+      factor = isDyn ? `drift factor k=${k}/day toward pH ${fmt(config.phEq, 1)} (dynamic, from your readings)` : `drift factor k=${k}/day toward pH ${fmt(config.phEq, 1)} (fallback — needs 2+ recent pH readings)`;
+    }
+    return /*#__PURE__*/React.createElement(React.Fragment, null, measuredPts.length, " measured point", measuredPts.length !== 1 ? "s" : "", " in view \xB7 window: ", config.chartDaysBack === "" ? 21 : config.chartDaysBack, " days back to ", config.chartDaysFwd === "" ? 7 : config.chartDaysFwd, " days ahead", factor ? /*#__PURE__*/React.createElement(React.Fragment, null, " \xB7 ", factor) : null);
+  })())));
 }
 function SmartDot({
   cx,
@@ -1567,7 +1627,7 @@ function Settings({
     style: S.logH
   }, "Model & pool settings"), /*#__PURE__*/React.createElement("p", {
     style: S.logHint
-  }, "The forecast decays chlorine by a daily fraction derived from your measured loss (loss per day \xF7 average FC over the window).", learned && learned.frac != null ? ` Right now that dynamic fraction is ${fmt(learned.frac * 100, 0)}%/day (from an average FC of ${fmt(learned.avgFC)} ppm). The "sun loss rate" below is only a fallback used when there aren't 2+ recent readings.` : ` With no recent readings yet, it's using the fallback "sun loss rate" below.`), /*#__PURE__*/React.createElement("div", {
+  }, "The forecast decays chlorine by a daily fraction derived from your measured loss (loss per day \xF7 average FC over the window).", learned && learned.frac != null ? ` FC decay fraction is dynamically ${fmt(learned.frac * 100, 0)}%/day (from avg FC ${fmt(learned.avgFC)} ppm).` : ` FC decay is using the fallback fraction below until there are 2+ recent FC readings.`, learned && learned.phK != null ? ` pH drift k is dynamically ${fmt(learned.phK, 2)}/day (toward equilibrium ${fmt(config.phEq, 1)}).` : ` pH drift is using the fallback k below until there are 2+ recent pH readings.`), /*#__PURE__*/React.createElement("div", {
     className: "two-col",
     style: S.setGrid
   }, rows.map(([k, l, step]) => /*#__PURE__*/React.createElement("div", {
