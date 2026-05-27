@@ -920,18 +920,48 @@ function App() {
     });
     return win.length ? win : series; // fall back to full if window misses all data
   }, [series, config.chartDaysBack, config.chartDaysFwd]);
-  const fcZeroDay = useMemo(() => {
-    const idx = series.findIndex(s => !s._future);
-    if (idx < 0) return null;
-    for (let i = idx; i < series.length; i++) {
-      if (series[i].fc != null && series[i].fc < 1) {
-        return {
-          days: Math.round((new Date(series[i].date) - new Date(series[idx].date)) / MS_DAY),
-          date: series[i].date
-        };
+  const forecast = useMemo(() => {
+    if (!series.length) return null;
+    const todayIso = todayISO();
+    // Anchor at today's row (or the last non-future row if today isn't in the series yet).
+    let startIdx = series.findIndex(s => s.date === todayIso);
+    if (startIdx < 0) {
+      for (let i = series.length - 1; i >= 0; i--) {
+        if (!series[i]._future) {
+          startIdx = i;
+          break;
+        }
       }
     }
-    return null;
+    if (startIdx < 0) startIdx = 0;
+    const startDate = new Date(series[startIdx].date);
+    const daysFrom = iso => Math.round((new Date(iso) - startDate) / MS_DAY);
+    let fcBelow1 = null,
+      phAbove = null;
+    const phLimit = 7.9;
+    // Only scan forward from today; ignore historical crossings.
+    for (let i = startIdx; i < series.length; i++) {
+      const s = series[i];
+      if (fcBelow1 == null && s.fc != null && s.fc < 1) {
+        fcBelow1 = {
+          days: daysFrom(s.date),
+          date: s.date
+        };
+      }
+      if (phAbove == null && s.ph != null && s.ph > phLimit) {
+        phAbove = {
+          days: daysFrom(s.date),
+          date: s.date
+        };
+      }
+      if (fcBelow1 && phAbove) break;
+    }
+    return {
+      fcBelow1,
+      phAbove,
+      phLimit,
+      startsToday: series[startIdx].date === todayIso
+    };
   }, [series]);
   const recs = useMemo(() => {
     if (!latest) return [];
@@ -1052,7 +1082,7 @@ function App() {
     latest,
     focus,
     setFocus,
-    fcZeroDay,
+    forecast,
     recs,
     config
   }), tab === "log" && /*#__PURE__*/React.createElement(LogTab, {
@@ -1084,7 +1114,7 @@ function Dashboard({
   latest,
   focus,
   setFocus,
-  fcZeroDay,
+  forecast,
   recs,
   config
 }) {
@@ -1140,9 +1170,18 @@ function Dashboard({
     style: S.insight
   }, /*#__PURE__*/React.createElement("div", {
     style: S.insightK
-  }, "Chlorine forecast"), /*#__PURE__*/React.createElement("div", {
+  }, "Forecast"), /*#__PURE__*/React.createElement("div", {
     style: S.insightV
-  }, fcZeroDay ? /*#__PURE__*/React.createElement("span", null, "FC drops below 1 ppm in ", /*#__PURE__*/React.createElement("b", null, fcZeroDay.days, " day", fcZeroDay.days !== 1 ? "s" : ""), " (", fcZeroDay.date, ")") : "FC stays above 1 ppm through the forecast")), /*#__PURE__*/React.createElement("div", {
+  }, (() => {
+    const phrase = c => c == null ? null : c.days <= 0 ? "already" : c.days === 1 ? "in 1 day" : `in ${c.days} days`;
+    const fc = forecast && forecast.fcBelow1,
+      ph = forecast && forecast.phAbove;
+    return /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", null, fc ? /*#__PURE__*/React.createElement("span", null, "FC drops below 1 ppm ", /*#__PURE__*/React.createElement("b", null, phrase(fc)), fc.days > 0 ? ` (${fc.date})` : "") : /*#__PURE__*/React.createElement("span", null, "FC stays above 1 ppm through the forecast")), /*#__PURE__*/React.createElement("div", {
+      style: {
+        marginTop: 4
+      }
+    }, ph ? /*#__PURE__*/React.createElement("span", null, "pH rises above ", forecast.phLimit, " ", /*#__PURE__*/React.createElement("b", null, phrase(ph)), ph.days > 0 ? ` (${ph.date})` : "") : /*#__PURE__*/React.createElement("span", null, "pH stays at or below ", forecast ? forecast.phLimit : 7.9, " through the forecast")));
+  })())), /*#__PURE__*/React.createElement("div", {
     style: S.insight
   }, /*#__PURE__*/React.createElement("div", {
     style: S.insightK
