@@ -513,6 +513,7 @@ const PARAMS = [{
   hi: 0.3
 }];
 const MS_DAY = 86400000;
+const HOUR = 3600000;
 // Local-time date string (YYYY-MM-DD). Using local avoids the UTC rollover bug where
 // evenings in US time zones read as "tomorrow" because toISOString() is UTC.
 const toLocalISO = d => {
@@ -520,6 +521,27 @@ const toLocalISO = d => {
   return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, "0")}-${String(x.getDate()).padStart(2, "0")}`;
 };
 const todayISO = () => toLocalISO(new Date());
+// datetime-local value (YYYY-MM-DDTHH:MM) in local time, for the form default.
+const nowLocalDT = () => {
+  const x = new Date();
+  return `${toLocalISO(x)}T${String(x.getHours()).padStart(2, "0")}:${String(x.getMinutes()).padStart(2, "0")}`;
+};
+// Millisecond timestamp for any entry. New entries carry .ts (ISO datetime-local string,
+// interpreted as local time). Legacy entries have only .date (YYYY-MM-DD) → treat as noon local
+// so they sit neutrally within the day and don't shift relative ordering.
+const tsOf = e => {
+  if (e.ts) {
+    const t = new Date(e.ts).getTime();
+    if (!isNaN(t)) return t;
+  }
+  if (e.date) {
+    const t = new Date(e.date + "T12:00").getTime();
+    if (!isNaN(t)) return t;
+  }
+  return NaN;
+};
+// The local date string an entry belongs to (for the daily series / chart).
+const dateOf = e => e.ts ? toLocalISO(new Date(e.ts)) : e.date;
 const fmt = (n, d = 1) => n == null || isNaN(n) ? "—" : Number(n).toFixed(d);
 function csi(pH, CH, TA, CYA, T) {
   if ([pH, CH, TA, CYA, T].some(v => v == null || isNaN(v))) return null;
@@ -701,37 +723,42 @@ function App() {
     }
   }, [config, measurements, doses, loaded]);
   const learned = useMemo(() => {
-    const ms = measurements.filter(m => m.fc != null).sort((a, b) => a.date.localeCompare(b.date));
+    const ms = measurements.filter(m => m.fc != null).slice().sort((a, b) => tsOf(a) - tsOf(b));
     let demandArr = [];
-    // windowed totals for Option B (total chlorine lost / total days) within the loss window
     const win = config.lossWindow === "" || config.lossWindow == null || isNaN(config.lossWindow) ? 14 : Number(config.lossWindow);
     const cutoff = Date.now() - win * MS_DAY;
     let sumLoss = 0,
-      sumDays = 0,
+      sumHours = 0,
       winIntervals = 0;
     for (let i = 1; i < ms.length; i++) {
-      const days = (new Date(ms[i].date) - new Date(ms[i - 1].date)) / MS_DAY;
-      if (days <= 0 || days > 21) continue;
-      const dosedFC = doses.filter(d => d.date > ms[i - 1].date && d.date <= ms[i].date).reduce((s, d) => s + (ADDITIVES[d.chem]?.Cl || 0) * d.oz / config.volume, 0);
+      const tPrev = tsOf(ms[i - 1]),
+        tCur = tsOf(ms[i]);
+      const hours = (tCur - tPrev) / HOUR;
+      if (!(hours > 0) || hours > 21 * 24) continue; // skip non-positive or stale (>21d) gaps
+      // Raw convention: count every dose in (prev, cur] — including a same-day dose logged
+      // after the earlier reading. Timestamp comparison fixes the old boundary-drop bug.
+      const dosedFC = doses.filter(d => {
+        const t = tsOf(d);
+        return t > tPrev && t <= tCur;
+      }).reduce((s, d) => s + (ADDITIVES[d.chem]?.Cl || 0) * d.oz / config.volume, 0);
       const obsLoss = ms[i - 1].fc + dosedFC - ms[i].fc; // total chlorine lost over the interval
+      const days = hours / 24;
       const expSun = ms[i - 1].fc * config.rSun * days;
-      const demandPerDay = (obsLoss - expSun) / days; // loss beyond what sun explains (feeds the model)
+      const demandPerDay = (obsLoss - expSun) / days; // feeds the forecast model
       if (isFinite(demandPerDay)) demandArr.push(demandPerDay);
-      // include in the windowed total if the interval's later reading is within the window
-      if (new Date(ms[i].date).getTime() >= cutoff && isFinite(obsLoss)) {
+      if (tCur >= cutoff && isFinite(obsLoss)) {
         sumLoss += obsLoss;
-        sumDays += days;
+        sumHours += hours;
         winIntervals++;
       }
     }
-    const hasWin = winIntervals > 0 && sumDays > 0;
+    const hasWin = winIntervals > 0 && sumHours > 0;
     const hasDemand = demandArr.length > 0;
     if (!hasWin && !hasDemand) return null;
     return {
       demand: hasDemand ? Math.max(0, demandArr.reduce((a, b) => a + b, 0) / demandArr.length) : config.demand,
-      // for the decay model
-      totalLoss: hasWin ? sumLoss / sumDays : null,
-      // Option B over the window, for the header
+      totalLoss: hasWin ? sumLoss / (sumHours / 24) : null,
+      // ppm per day, from elapsed hours
       n: winIntervals,
       win
     };
@@ -740,17 +767,19 @@ function App() {
   const series = useMemo(() => {
     const have = measurements.filter(m => m.fc != null || m.ph != null);
     if (!have.length) return [];
-    const sorted = [...measurements].sort((a, b) => a.date.localeCompare(b.date));
-    const start = new Date(sorted[0].date);
-    const lastData = new Date(sorted[sorted.length - 1].date);
+    const sorted = [...measurements].sort((a, b) => tsOf(a) - tsOf(b));
+    const start = new Date(dateOf(sorted[0]) + "T00:00");
+    const lastData = new Date(dateOf(sorted[sorted.length - 1]) + "T00:00");
     const end = new Date(Math.max(lastData.getTime(), Date.now() + (config.chartDaysFwd || 7) * MS_DAY));
+    // If multiple measurements share a day, keep the latest that day as the day's anchor.
     const measBy = {};
     sorted.forEach(m => {
-      measBy[m.date] = m;
+      measBy[dateOf(m)] = m;
     });
     const dosesBy = {};
     doses.forEach(d => {
-      (dosesBy[d.date] = dosesBy[d.date] || []).push(d);
+      const k = dateOf(d);
+      (dosesBy[k] = dosesBy[k] || []).push(d);
     });
     const out = [];
     let st = {
@@ -903,15 +932,17 @@ function App() {
     lines.push("# POOL CHEMISTRY EXPORT  generated " + new Date().toISOString());
     lines.push("");
     lines.push("## MEASUREMENTS");
-    lines.push("date,temp_F,free_chlorine_ppm,pH,cya_ppm,alkalinity_ppm,calcium_ppm");
-    [...measurements].sort((a, b) => a.date.localeCompare(b.date)).forEach(m => {
-      lines.push([m.date, m.temp ?? "", m.fc ?? "", m.ph ?? "", m.cya ?? "", m.ta ?? "", m.ch ?? ""].join(","));
+    lines.push("datetime,date,temp_F,free_chlorine_ppm,pH,cya_ppm,alkalinity_ppm,calcium_ppm");
+    [...measurements].sort((a, b) => tsOf(a) - tsOf(b)).forEach(m => {
+      const dt = new Date(tsOf(m)).toISOString();
+      lines.push([dt, dateOf(m), m.temp ?? "", m.fc ?? "", m.ph ?? "", m.cya ?? "", m.ta ?? "", m.ch ?? ""].join(","));
     });
     lines.push("");
     lines.push("## ADDITIVES");
-    lines.push("date,chemical,amount_oz");
-    [...doses].sort((a, b) => a.date.localeCompare(b.date)).forEach(d => {
-      lines.push([d.date, '"' + d.chem + '"', d.oz].join(","));
+    lines.push("datetime,date,chemical,amount_oz");
+    [...doses].sort((a, b) => tsOf(a) - tsOf(b)).forEach(d => {
+      const dt = new Date(tsOf(d)).toISOString();
+      lines.push([dt, dateOf(d), '"' + d.chem + '"', d.oz].join(","));
     });
     lines.push("");
     lines.push("## DAILY MODELED + MEASURED SERIES");
@@ -1220,7 +1251,7 @@ function LogTab({
   config
 }) {
   const [mForm, setMForm] = useState({
-    date: todayISO(),
+    ts: nowLocalDT(),
     fc: "",
     ph: "",
     cya: "",
@@ -1229,20 +1260,21 @@ function LogTab({
     temp: ""
   });
   const [dForm, setDForm] = useState({
-    date: todayISO(),
+    ts: nowLocalDT(),
     chem: "NaOCl (10.5 wt%)",
     oz: ""
   });
   const addMeas = () => {
     const row = {
-      date: mForm.date
+      ts: mForm.ts
     };
     ["fc", "ph", "cya", "ta", "ch", "temp"].forEach(k => {
       if (mForm[k] !== "") row[k] = Number(mForm[k]);
     });
-    setMeasurements(prev => [...prev.filter(m => m.date !== row.date), row]);
+    // dedup only on identical timestamp (lets multiple readings per day coexist)
+    setMeasurements(prev => [...prev.filter(m => (m.ts || m.date) !== row.ts), row]);
     setMForm({
-      date: todayISO(),
+      ts: nowLocalDT(),
       fc: "",
       ph: "",
       cya: "",
@@ -1254,12 +1286,12 @@ function LogTab({
   const addDose = () => {
     if (dForm.oz === "") return;
     setDoses(prev => [...prev, {
-      date: dForm.date,
+      ts: dForm.ts,
       chem: dForm.chem,
       oz: Number(dForm.oz)
     }]);
     setDForm({
-      date: todayISO(),
+      ts: nowLocalDT(),
       chem: dForm.chem,
       oz: ""
     });
@@ -1276,6 +1308,12 @@ function LogTab({
       ch: a.CH * oz / config.volume
     };
   }, [dForm, config.volume]);
+  const showWhen = e => {
+    const t = tsOf(e);
+    if (isNaN(t)) return e.date || "";
+    const x = new Date(t);
+    return `${toLocalISO(x)} ${String(x.getHours()).padStart(2, "0")}:${String(x.getMinutes()).padStart(2, "0")}`;
+  };
   return /*#__PURE__*/React.createElement("div", {
     className: "two-col",
     style: S.logGrid
@@ -1285,16 +1323,16 @@ function LogTab({
     style: S.logH
   }, "Log a measurement"), /*#__PURE__*/React.createElement("p", {
     style: S.logHint
-  }, "Enter whatever you tested \u2014 blanks are fine. A real reading re-anchors the model and sharpens the demand estimate."), /*#__PURE__*/React.createElement("div", {
+  }, "Enter whatever you tested \u2014 blanks are fine. Date & time default to now; adjust if you're logging an earlier reading. Time is used for accurate chlorine-loss math."), /*#__PURE__*/React.createElement("div", {
     style: S.field
   }, /*#__PURE__*/React.createElement("label", {
     style: S.lab
-  }, "Date"), /*#__PURE__*/React.createElement("input", {
-    type: "date",
-    value: mForm.date,
+  }, "Date & time"), /*#__PURE__*/React.createElement("input", {
+    type: "datetime-local",
+    value: mForm.ts,
     onChange: e => setMForm({
       ...mForm,
-      date: e.target.value
+      ts: e.target.value
     }),
     style: S.input
   })), /*#__PURE__*/React.createElement("div", {
@@ -1336,12 +1374,12 @@ function LogTab({
     style: S.subH
   }, "History (", measurements.length, ")"), /*#__PURE__*/React.createElement("div", {
     style: S.histList
-  }, [...measurements].sort((a, b) => b.date.localeCompare(a.date)).map((m, i) => /*#__PURE__*/React.createElement("div", {
+  }, [...measurements].sort((a, b) => tsOf(b) - tsOf(a)).map((m, i) => /*#__PURE__*/React.createElement("div", {
     key: i,
     style: S.histRow
   }, /*#__PURE__*/React.createElement("span", {
     style: S.histDate
-  }, m.date), /*#__PURE__*/React.createElement("span", {
+  }, showWhen(m)), /*#__PURE__*/React.createElement("span", {
     style: S.histVals
   }, m.fc != null && `Cl ${m.fc} `, m.ph != null && `pH ${m.ph} `, m.cya != null && `CYA ${m.cya} `, m.ta != null && `TA ${m.ta} `, m.ch != null && `CH ${m.ch}`), /*#__PURE__*/React.createElement("button", {
     onClick: () => setMeasurements(measurements.filter(x => x !== m)),
@@ -1356,12 +1394,12 @@ function LogTab({
     style: S.field
   }, /*#__PURE__*/React.createElement("label", {
     style: S.lab
-  }, "Date"), /*#__PURE__*/React.createElement("input", {
-    type: "date",
-    value: dForm.date,
+  }, "Date & time"), /*#__PURE__*/React.createElement("input", {
+    type: "datetime-local",
+    value: dForm.ts,
     onChange: e => setDForm({
       ...dForm,
-      date: e.target.value
+      ts: e.target.value
     }),
     style: S.input
   })), /*#__PURE__*/React.createElement("div", {
@@ -1406,12 +1444,12 @@ function LogTab({
     style: S.subH
   }, "History (", doses.length, ")"), /*#__PURE__*/React.createElement("div", {
     style: S.histList
-  }, [...doses].sort((a, b) => b.date.localeCompare(a.date)).map((d, i) => /*#__PURE__*/React.createElement("div", {
+  }, [...doses].sort((a, b) => tsOf(b) - tsOf(a)).map((d, i) => /*#__PURE__*/React.createElement("div", {
     key: i,
     style: S.histRow
   }, /*#__PURE__*/React.createElement("span", {
     style: S.histDate
-  }, d.date), /*#__PURE__*/React.createElement("span", {
+  }, showWhen(d)), /*#__PURE__*/React.createElement("span", {
     style: S.histVals
   }, d.oz, " ", ADDITIVES[d.chem]?.unit, " \xB7 ", d.chem), /*#__PURE__*/React.createElement("button", {
     onClick: () => setDoses(doses.filter(x => x !== d)),
