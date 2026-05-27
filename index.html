@@ -553,16 +553,10 @@ function csi(pH, CH, TA, CYA, T) {
   const TF = -0.00006 * T * T + 0.0189 * T - 0.5338;
   return pH + CF + AF + TF - 12.1;
 }
-function decayFC(fc, rSun, demand) {
+function decayFC(fc, frac) {
   if (fc == null) return null;
-  let s = fc * rSun,
-    d = demand;
-  if (s + d > fc) {
-    const k = fc / (s + d);
-    s *= k;
-    d *= k;
-  }
-  return Math.max(0, fc - s - d);
+  const f = Math.max(0, Math.min(0.95, frac || 0));
+  return Math.max(0, fc * (1 - f));
 }
 function driftPH(ph, eq, k) {
   return ph == null ? null : ph + (eq - ph) * (1 - Math.exp(-k));
@@ -725,32 +719,17 @@ function App() {
   }, [config, measurements, doses, loaded]);
   const learned = useMemo(() => {
     const ms = measurements.filter(m => m.fc != null).slice().sort((a, b) => tsOf(a) - tsOf(b));
-    let demandArr = [];
     const win = config.lossWindow === "" || config.lossWindow == null || isNaN(config.lossWindow) ? 14 : Number(config.lossWindow);
     const cutoff = Date.now() - win * MS_DAY;
-    // --- per-interval demand (feeds the forecast model only) ---
-    for (let i = 1; i < ms.length; i++) {
-      const tPrev = tsOf(ms[i - 1]),
-        tCur = tsOf(ms[i]);
-      const hours = (tCur - tPrev) / HOUR;
-      if (!(hours > 0) || hours > 21 * 24) continue;
-      const dosedFC = doses.filter(d => {
-        const t = tsOf(d);
-        return t > tPrev && t <= tCur;
-      }).reduce((s, d) => s + (ADDITIVES[d.chem]?.Cl || 0) * d.oz / config.volume, 0);
-      const obsLoss = ms[i - 1].fc + dosedFC - ms[i].fc;
-      const days = hours / 24;
-      const demandPerDay = (obsLoss - expSunSafe(ms[i - 1].fc, config.rSun, days)) / days;
-      if (isFinite(demandPerDay)) demandArr.push(demandPerDay);
-    }
     // --- headline chlorine loss: SINGLE SPAN, raw convention ---
-    // Take the measurements within the window, use earliest & latest as the span endpoints,
-    // and count EVERY dose between them (inclusive). This can't drop a boundary dose the way
-    // interval-chaining did. loss = firstFC + all doses in span - lastFC, over elapsed hours.
+    // Earliest & latest measurement in the window are the span endpoints; count EVERY dose
+    // between them (inclusive). loss = firstFC + all doses in span - lastFC, over elapsed hours.
     const inWin = ms.filter(m => tsOf(m) >= cutoff);
     let totalLoss = null,
       spanDays = 0,
-      nReadings = 0;
+      nReadings = 0,
+      dynFrac = null,
+      avgFC = null;
     if (inWin.length >= 2) {
       const first = inWin[0],
         last = inWin[inWin.length - 1];
@@ -758,29 +737,73 @@ function App() {
         tB = tsOf(last);
       const hours = (tB - tA) / HOUR;
       if (hours > 0) {
-        const dosed = doses.filter(d => {
+        const spanDoses = doses.filter(d => {
           const t = tsOf(d);
           return t >= tA && t <= tB;
-        }).reduce((s, d) => s + (ADDITIVES[d.chem]?.Cl || 0) * d.oz / config.volume, 0);
+        });
+        const dosed = spanDoses.reduce((s, d) => s + (ADDITIVES[d.chem]?.Cl || 0) * d.oz / config.volume, 0);
         const loss = first.fc + dosed - last.fc;
         spanDays = hours / 24;
         totalLoss = loss / spanDays;
         nReadings = inWin.length;
+
+        // --- dynamic decay fraction = loss per day / average FC the loss acted on ---
+        // Reconstruct a day-by-day FC level across the span WITHOUT using the decay fraction
+        // (so this isn't circular): start at first.fc, step day by day, add that day's doses,
+        // and glide toward the next measured anchor so the average reflects real chlorine present.
+        const dayMs = MS_DAY;
+        let levels = [];
+        // map doses to day index
+        const dayDose = {};
+        spanDoses.forEach(d => {
+          const k = Math.floor((tsOf(d) - tA) / dayMs);
+          dayDose[k] = (dayDose[k] || 0) + (ADDITIVES[d.chem]?.Cl || 0) * d.oz / config.volume;
+        });
+        // anchors: measured FC at each measurement's day index
+        const anchor = {};
+        inWin.forEach(m => {
+          const k = Math.round((tsOf(m) - tA) / dayMs);
+          anchor[k] = m.fc;
+        });
+        const totalDays = Math.max(1, Math.round(spanDays));
+        let lvl = first.fc;
+        for (let k = 0; k <= totalDays; k++) {
+          if (anchor[k] != null) lvl = anchor[k]; // re-anchor to a real reading
+          if (dayDose[k]) lvl += dayDose[k]; // a dose that day raises the level
+          levels.push(Math.max(0, lvl));
+          // glide toward the next anchor if one exists ahead (keeps interpolation realistic)
+          let nextK = null;
+          for (let j = k + 1; j <= totalDays; j++) {
+            if (anchor[j] != null) {
+              nextK = j;
+              break;
+            }
+          }
+          if (nextK != null) {
+            const steps = nextK - k;
+            if (steps > 0) lvl += (anchor[nextK] - lvl) / steps;
+          }
+        }
+        avgFC = levels.reduce((a, b) => a + b, 0) / levels.length;
+        if (avgFC > 0 && totalLoss > 0) {
+          dynFrac = Math.max(0, Math.min(0.95, totalLoss / avgFC));
+        }
       }
     }
-    const hasDemand = demandArr.length > 0;
-    if (totalLoss == null && !hasDemand) return null;
+    if (totalLoss == null) return null;
     return {
-      demand: hasDemand ? Math.max(0, demandArr.reduce((a, b) => a + b, 0) / demandArr.length) : config.demand,
-      totalLoss: totalLoss,
-      // single-span raw ppm/day over the window
+      totalLoss,
       n: nReadings,
-      // number of readings spanned
-      spanDays: spanDays,
-      win
+      spanDays,
+      win,
+      frac: dynFrac,
+      // dynamic daily fraction for the forecast (null if not derivable)
+      avgFC
     };
-  }, [measurements, doses, config.volume, config.rSun, config.lossWindow, config.demand]);
-  const effDemand = learned && learned.demand != null ? learned.demand : config.demand;
+  }, [measurements, doses, config.volume, config.lossWindow]);
+
+  // Forecast fraction: dynamic (from measured loss) when available, else the Settings fallback.
+  const effFrac = learned && learned.frac != null ? learned.frac : config.rSun || 0.45;
   const series = useMemo(() => {
     const have = measurements.filter(m => m.fc != null || m.ph != null);
     if (!have.length) return [];
@@ -810,7 +833,7 @@ function App() {
     for (let t = new Date(start); t <= end; t = new Date(t.getTime() + MS_DAY)) {
       const iso = toLocalISO(t);
       // 1) natural decay/drift carries yesterday's state into today
-      if (st.fc != null) st.fc = decayFC(st.fc, config.rSun, effDemand);
+      if (st.fc != null) st.fc = decayFC(st.fc, effFrac);
       if (st.ph != null) st.ph = driftPH(st.ph, config.phEq, config.phK);
       // 2) a real measurement re-anchors the baseline for the day (overrides the model)
       const m = measBy[iso];
@@ -870,7 +893,7 @@ function App() {
       });
     }
     return out;
-  }, [measurements, doses, config, effDemand]);
+  }, [measurements, doses, config, effFrac]);
 
   // "latest" = the current day's row (today), which now includes any measurement + additive
   // contributions applied for today. If today is beyond the series, fall back to the last row.
@@ -1053,7 +1076,7 @@ function App() {
     }
   }), /*#__PURE__*/React.createElement("footer", {
     style: S.footer
-  }, "Headline \"chlorine loss\" is your measured overall loss per day (from readings + additives). The forward forecast models it as sun (", fmt(config.rSun * 100, 0), "%/day \xD7 current FC) + demand (", fmt(effDemand), " ppm/day). Additive coefficients & CSI equation from your spreadsheet. ", SYNC_ON ? "Synced across your devices via Supabase; Export CSV for an extra backup." : "Data saved in this browser; use Export CSV to back it up."));
+  }, "Headline \"chlorine loss\" is your measured overall loss per day (readings + additives, single span). The forecast decays FC by a daily fraction ", learned && learned.frac != null ? `of ${fmt(learned.frac * 100, 0)}%/day, derived from that measured loss ÷ average FC` : `(fallback ${fmt((config.rSun || 0.45) * 100, 0)}%/day until there are 2+ recent readings)`, ". Additive coefficients & CSI equation from your spreadsheet. ", SYNC_ON ? "Synced across your devices via Supabase; Export CSV for an extra backup." : "Data saved in this browser; use Export CSV to back it up."));
 }
 function Dashboard({
   series,
@@ -1485,7 +1508,7 @@ function Settings({
     ...config,
     [k]: v === "" ? "" : Number(v)
   });
-  const rows = [["volume", "Pool volume (gal)", 1], ["temp", "Default water temp (°F)", 1], ["rSun", "Sun loss rate (frac/day)", 0.01], ["demand", "Demand fallback (ppm/day)", 0.1], ["phEq", "pH equilibrium", 0.1], ["phK", "pH drift speed", 0.05], ["chartDaysBack", "Chart range: days back", 1], ["chartDaysFwd", "Chart range: days forward", 1], ["lossWindow", "Chlorine loss window (days)", 1]];
+  const rows = [["volume", "Pool volume (gal)", 1], ["temp", "Default water temp (°F)", 1], ["rSun", "Fallback loss fraction (per day)", 0.01], ["phEq", "pH equilibrium", 0.1], ["phK", "pH drift speed", 0.05], ["chartDaysBack", "Chart range: days back", 1], ["chartDaysFwd", "Chart range: days forward", 1], ["lossWindow", "Chlorine loss window (days)", 1]];
   const targets = [["Free chlorine (ppm)", "fcLo", "fcHi", 0.5], ["pH", "phLo", "phHi", 0.1], ["Cyanuric acid (ppm)", "cyaLo", "cyaHi", 5], ["Calcium hardness (ppm)", "chLo", "chHi", 10], ["Alkalinity (ppm)", "taLo", "taHi", 10], ["Saturation index (CSI)", "csiLo", "csiHi", 0.1]];
   const canSuggest = latestCya != null && !isNaN(latestCya) && latestCya > 0;
   const suggestFC = () => {
@@ -1505,7 +1528,7 @@ function Settings({
     style: S.logH
   }, "Model & pool settings"), /*#__PURE__*/React.createElement("p", {
     style: S.logHint
-  }, "These drive the decay model \u2014 the sun rate and demand came from the chemistry calibrated to your ~3 ppm/day loss.", learned && ` Right now the app overrides the demand fallback with ${fmt(learned.demand)} ppm/day learned from your real logs.`), /*#__PURE__*/React.createElement("div", {
+  }, "The forecast decays chlorine by a daily fraction derived from your measured loss (loss per day \xF7 average FC over the window).", learned && learned.frac != null ? ` Right now that dynamic fraction is ${fmt(learned.frac * 100, 0)}%/day (from an average FC of ${fmt(learned.avgFC)} ppm). The "sun loss rate" below is only a fallback used when there aren't 2+ recent readings.` : ` With no recent readings yet, it's using the fallback "sun loss rate" below.`), /*#__PURE__*/React.createElement("div", {
     className: "two-col",
     style: S.setGrid
   }, rows.map(([k, l, step]) => /*#__PURE__*/React.createElement("div", {
