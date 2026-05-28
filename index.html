@@ -464,7 +464,7 @@ const ADDITIVES = {
     Cl: 0,
     CYA: 0,
     TA: 4462,
-    pH: 9.1,
+    pH: 0,
     CH: 0,
     unit: "oz"
   }
@@ -543,6 +543,12 @@ const tsOf = e => {
 // The local date string an entry belongs to (for the daily series / chart).
 const dateOf = e => e.ts ? toLocalISO(new Date(e.ts)) : e.date;
 const expSunSafe = (fc, r, days) => (fc == null || isNaN(fc) ? 0 : fc) * (r || 0) * (days || 0);
+// pH shift from sodium bicarbonate using Henderson-Hasselbalch buffer chemistry.
+// dPH = log10(1 + dTA/currentTA). Returns 0 if TA unknown or zero.
+const bicarPHShift = (dTA, currentTA) => {
+  if (!currentTA || currentTA <= 0 || !dTA || dTA <= 0) return 0;
+  return Math.log10(1 + dTA / currentTA);
+};
 const fmt = (n, d = 1) => n == null || isNaN(n) ? "—" : Number(n).toFixed(d);
 function csi(pH, CH, TA, CYA, T) {
   if ([pH, CH, TA, CYA, T].some(v => v == null || isNaN(v))) return null;
@@ -801,10 +807,17 @@ function App() {
       const hours = (tCur - tPrev) / HOUR;
       if (!(hours > 0) || hours > 21 * 24) continue;
       if (tCur < cutoff) continue; // interval ends before the window
-      const dPh = doses.filter(d => {
+      const intervalDoses = doses.filter(d => {
         const t = tsOf(d);
         return t > tPrev && t <= tCur;
-      }).reduce((s, d) => s + (ADDITIVES[d.chem]?.pH || 0) * d.oz / config.volume, 0);
+      });
+      // Linear pH contribution from all additives (bicarb has coefficient 0 now)
+      const dPhLinear = intervalDoses.reduce((s, d) => s + (ADDITIVES[d.chem]?.pH || 0) * d.oz / config.volume, 0);
+      // Buffer pH contribution from sodium bicarbonate: use phMs[i-1].ta if available, else skip
+      const bicarb_dTA = intervalDoses.filter(d => d.chem === "Sodium Bicarbonate").reduce((s, d) => s + ADDITIVES[d.chem].TA * d.oz / config.volume, 0);
+      const taPrev = phMs[i - 1].ta; // only defined if that measurement included TA
+      const dPhBicarb = bicarb_dTA > 0 && taPrev > 0 ? bicarPHShift(bicarb_dTA, taPrev) : 0;
+      const dPh = dPhLinear + dPhBicarb;
       const phStart = phMs[i - 1].ph + dPh; // pH after additive shifts but before drift
       const phEnd = phMs[i].ph;
       const days = hours / 24;
@@ -908,17 +921,21 @@ function App() {
         dz.ch += a.CH * d.oz / config.volume;
       });
       if (td.length) {
-        // initialize any null channel from the day's measurement so a dose has something to add to
         if (st.fc == null && dz.fc) st.fc = 0;
         if (st.ph == null && dz.ph) st.ph = 0;
         if (st.cya == null && dz.cya) st.cya = 0;
         if (st.ta == null && dz.ta) st.ta = 0;
         if (st.ch == null && dz.ch) st.ch = 0;
         if (st.fc != null) st.fc += dz.fc;
-        if (st.ph != null) st.ph += dz.ph;
         if (st.cya != null) st.cya += dz.cya;
-        if (st.ta != null) st.ta += dz.ta;
         if (st.ch != null) st.ch += dz.ch;
+        // Apply TA first so bicarb pH shift reads the correct updated TA
+        if (st.ta != null) st.ta += dz.ta;
+        // Sodium bicarbonate pH: buffer chemistry (log-based). All other pH: linear coefficient.
+        const bicarb_dTA = td.filter(d => d.chem === "Sodium Bicarbonate").reduce((s, d) => s + ADDITIVES[d.chem].TA * d.oz / config.volume, 0);
+        const bicarb_dPH = bicarPHShift(bicarb_dTA, st.ta != null ? st.ta - bicarb_dTA : null);
+        // dz.ph already has 0 for bicarb (coefficient set to 0), so add buffer pH on top
+        if (st.ph != null) st.ph += dz.ph + bicarb_dPH;
       }
       const future = iso > todayISO();
       const cv = csi(st.ph, st.ch, st.ta, st.cya, m?.temp ?? T);
@@ -1136,7 +1153,8 @@ function App() {
     setMeasurements,
     doses,
     setDoses,
-    config
+    config,
+    latest
   }), tab === "settings" && /*#__PURE__*/React.createElement(Settings, {
     config,
     setConfig,
@@ -1387,7 +1405,8 @@ function LogTab({
   setMeasurements,
   doses,
   setDoses,
-  config
+  config,
+  latest
 }) {
   const [mForm, setMForm] = useState({
     ts: nowLocalDT(),
@@ -1439,14 +1458,17 @@ function LogTab({
     const a = ADDITIVES[dForm.chem];
     const oz = Number(dForm.oz) || 0;
     if (!a || !oz) return null;
+    const dTA = a.TA * oz / config.volume;
+    // Sodium bicarbonate pH: Henderson-Hasselbalch buffer; all others: linear coefficient
+    const dPH = dForm.chem === "Sodium Bicarbonate" ? bicarPHShift(dTA, latest && latest.ta > 0 ? latest.ta : 80) : a.pH * oz / config.volume;
     return {
       fc: a.Cl * oz / config.volume,
       cya: a.CYA * oz / config.volume,
-      ta: a.TA * oz / config.volume,
-      ph: a.pH * oz / config.volume,
+      ta: dTA,
+      ph: dPH,
       ch: a.CH * oz / config.volume
     };
-  }, [dForm, config.volume]);
+  }, [dForm, config.volume, latest]);
   const showWhen = e => {
     const t = tsOf(e);
     if (isNaN(t)) return e.date || "";
