@@ -864,19 +864,46 @@ function App() {
     const have = measurements.filter(m => m.fc != null || m.ph != null);
     if (!have.length) return [];
     const sorted = [...measurements].sort((a, b) => tsOf(a) - tsOf(b));
-    const start = new Date(dateOf(sorted[0]) + "T00:00");
-    const lastData = new Date(dateOf(sorted[sorted.length - 1]) + "T00:00");
-    const end = new Date(Math.max(lastData.getTime(), Date.now() + (config.chartDaysFwd || 7) * MS_DAY));
-    // If multiple measurements share a day, keep the latest that day as the day's anchor.
-    const measBy = {};
-    sorted.forEach(m => {
-      measBy[dateOf(m)] = m;
-    });
-    const dosesBy = {};
-    doses.forEach(d => {
-      const k = dateOf(d);
-      (dosesBy[k] = dosesBy[k] || []).push(d);
-    });
+    const startTs = tsOf(sorted[0]);
+    const lastTs = tsOf(sorted[sorted.length - 1]);
+    const endTs = Math.max(lastTs, Date.now() + (config.chartDaysFwd || 7) * MS_DAY);
+
+    // ---- build the event timeline: measurements, additives, and 6 PM modeled checkpoints ----
+    const events = [];
+    sorted.forEach(m => events.push({
+      t: tsOf(m),
+      kind: "meas",
+      data: m
+    }));
+    doses.forEach(d => events.push({
+      t: tsOf(d),
+      kind: "dose",
+      data: d
+    }));
+    // 6 PM checkpoints for each day in the span (so the chart has a daily modeled cadence)
+    const sixPMs = [];
+    const firstDay = new Date(startTs);
+    firstDay.setHours(0, 0, 0, 0);
+    for (let t = firstDay.getTime(); t <= endTs + MS_DAY; t += MS_DAY) {
+      const d = new Date(t);
+      d.setHours(18, 0, 0, 0); // 6:00 PM local
+      sixPMs.push(d.getTime());
+    }
+    sixPMs.forEach(t => events.push({
+      t,
+      kind: "model"
+    }));
+    events.sort((a, b) => a.t - b.t || {
+      meas: 0,
+      dose: 1,
+      model: 2
+    }[a.kind] - {
+      meas: 0,
+      dose: 1,
+      model: 2
+    }[b.kind]);
+
+    // ---- walk the timeline applying decay/drift, measurements, and doses ----
     const out = [];
     let st = {
       fc: null,
@@ -885,42 +912,52 @@ function App() {
       ta: null,
       ch: null
     };
+    let lastT = null;
     const T = config.temp;
-    for (let t = new Date(start); t <= end; t = new Date(t.getTime() + MS_DAY)) {
-      const iso = toLocalISO(t);
-      // 1) natural decay/drift carries yesterday's state into today
-      if (st.fc != null) st.fc = decayFC(st.fc, effFrac);
-      if (st.ph != null) st.ph = driftPH(st.ph, config.phEq, effPhK);
-      // 2) a real measurement re-anchors the baseline for the day (overrides the model)
-      const m = measBy[iso];
-      const mf = {};
-      if (m) {
+    const todayMidnight = new Date();
+    todayMidnight.setHours(0, 0, 0, 0);
+    const applyDecayUntil = t => {
+      if (lastT == null) {
+        lastT = t;
+        return;
+      }
+      const days = (t - lastT) / MS_DAY;
+      if (days > 0) {
+        // continuous-time form of fractional decay: fc*(1-f)^days
+        if (st.fc != null) st.fc = Math.max(0, st.fc * Math.pow(1 - effFrac, days));
+        if (st.ph != null) {
+          // ph drift toward equilibrium: ph(t) = phEq - (phEq-ph)*exp(-k*days)
+          st.ph = config.phEq - (config.phEq - st.ph) * Math.exp(-effPhK * days);
+        }
+      }
+      lastT = t;
+    };
+    events.forEach(ev => {
+      applyDecayUntil(ev.t);
+      let mf = {},
+        hasDose = false,
+        kind = ev.kind;
+      if (ev.kind === "meas") {
+        const m = ev.data;
         ["fc", "ph", "cya", "ta", "ch"].forEach(k => {
           if (m[k] != null && m[k] !== "") {
             st[k] = Number(m[k]);
             mf[k] = true;
           }
         });
-      }
-      // 3) additives logged that day add ON TOP of the measurement/model baseline
-      const td = dosesBy[iso] || [];
-      let dz = {
-        fc: 0,
-        ph: 0,
-        cya: 0,
-        ta: 0,
-        ch: 0
-      };
-      td.forEach(d => {
+        // Skip emitting a point if this measurement has none of the tracked params
+        if (!Object.keys(mf).length) return;
+      } else if (ev.kind === "dose") {
+        const d = ev.data;
         const a = ADDITIVES[d.chem];
         if (!a) return;
-        dz.fc += a.Cl * d.oz / config.volume;
-        dz.cya += a.CYA * d.oz / config.volume;
-        dz.ta += a.TA * d.oz / config.volume;
-        dz.ph += a.pH * d.oz / config.volume;
-        dz.ch += a.CH * d.oz / config.volume;
-      });
-      if (td.length) {
+        const dz = {
+          fc: a.Cl * d.oz / config.volume,
+          cya: a.CYA * d.oz / config.volume,
+          ta: a.TA * d.oz / config.volume,
+          ph: a.pH * d.oz / config.volume,
+          ch: a.CH * d.oz / config.volume
+        };
         if (st.fc == null && dz.fc) st.fc = 0;
         if (st.ph == null && dz.ph) st.ph = 0;
         if (st.cya == null && dz.cya) st.cya = 0;
@@ -929,29 +966,34 @@ function App() {
         if (st.fc != null) st.fc += dz.fc;
         if (st.cya != null) st.cya += dz.cya;
         if (st.ch != null) st.ch += dz.ch;
-        // Apply TA first so bicarb pH shift reads the correct updated TA
         if (st.ta != null) st.ta += dz.ta;
-        // Sodium bicarbonate pH: buffer chemistry (log-based). All other pH: linear coefficient.
-        const bicarb_dTA = td.filter(d => d.chem === "Sodium Bicarbonate").reduce((s, d) => s + ADDITIVES[d.chem].TA * d.oz / config.volume, 0);
+        // Bicarb pH uses buffer chemistry (log-based) reading post-TA-update state
+        const bicarb_dTA = d.chem === "Sodium Bicarbonate" ? dz.ta : 0;
         const bicarb_dPH = bicarPHShift(bicarb_dTA, st.ta != null ? st.ta - bicarb_dTA : null);
-        // dz.ph already has 0 for bicarb (coefficient set to 0), so add buffer pH on top
         if (st.ph != null) st.ph += dz.ph + bicarb_dPH;
+        hasDose = true;
       }
-      const future = iso > todayISO();
-      const cv = csi(st.ph, st.ch, st.ta, st.cya, m?.temp ?? T);
+      // For "model" events, no state change — just emit a point at the current state.
+
+      // Emit a point if we have state to plot
+      if (st.fc == null && st.ph == null && st.cya == null && st.ta == null && st.ch == null) return;
+      const cv = csi(st.ph, st.ch, st.ta, st.cya, ev.data && ev.data.temp || T);
       out.push({
-        date: iso,
+        t: ev.t,
+        date: toLocalISO(new Date(ev.t)),
         fc: st.fc == null ? null : +st.fc.toFixed(2),
         ph: st.ph == null ? null : +st.ph.toFixed(2),
         cya: st.cya == null ? null : +st.cya.toFixed(1),
         ta: st.ta == null ? null : +st.ta.toFixed(1),
         ch: st.ch == null ? null : +st.ch.toFixed(1),
         csi: cv == null ? null : +cv.toFixed(2),
-        _meas: mf,
-        _hasDose: td.length > 0,
-        _future: future
+        _kind: kind,
+        // "meas" | "dose" | "model"
+        _meas: kind === "meas" ? mf : {},
+        _hasDose: hasDose,
+        _future: ev.t > Date.now()
       });
-    }
+    });
     return out;
   }, [measurements, doses, config, effFrac, effPhK]);
 
@@ -959,11 +1001,8 @@ function App() {
   // contributions applied for today. If today is beyond the series, fall back to the last row.
   const latest = useMemo(() => {
     if (!series.length) return null;
-    const todayIso = todayISO();
-    const todayRow = series.find(s => s.date === todayIso);
-    if (todayRow) return todayRow;
     const past = series.filter(s => !s._future);
-    return past.length ? past[past.length - 1] : series[series.length - 1];
+    return past.length ? past[past.length - 1] : series[0];
   }, [series]);
 
   // Chart display window: [today - chartDaysBack, today + chartDaysFwd], clamped to available data.
@@ -974,43 +1013,37 @@ function App() {
     const now = Date.now();
     const lo = now - back * MS_DAY,
       hi = now + fwd * MS_DAY;
-    const win = series.filter(s => {
-      const t = new Date(s.date).getTime();
-      return t >= lo && t <= hi;
-    });
+    const win = series.filter(s => s.t >= lo && s.t <= hi);
     return win.length ? win : series; // fall back to full if window misses all data
   }, [series, config.chartDaysBack, config.chartDaysFwd]);
   const forecast = useMemo(() => {
     if (!series.length) return null;
-    const todayIso = todayISO();
-    // Anchor at today's row (or the last non-future row if today isn't in the series yet).
-    let startIdx = series.findIndex(s => s.date === todayIso);
-    if (startIdx < 0) {
-      for (let i = series.length - 1; i >= 0; i--) {
-        if (!series[i]._future) {
-          startIdx = i;
-          break;
-        }
+    // Anchor at the last non-future point (today's most recent event).
+    let startIdx = -1;
+    for (let i = series.length - 1; i >= 0; i--) {
+      if (!series[i]._future) {
+        startIdx = i;
+        break;
       }
     }
     if (startIdx < 0) startIdx = 0;
-    const startDate = new Date(series[startIdx].date);
-    const daysFrom = iso => Math.round((new Date(iso) - startDate) / MS_DAY);
+    const startT = series[startIdx].t;
+    const daysFrom = t => Math.max(0, Math.round((t - startT) / MS_DAY));
     let fcBelow1 = null,
       phAbove = null;
     const phLimit = 7.9;
-    // Only scan forward from today; ignore historical crossings.
-    for (let i = startIdx; i < series.length; i++) {
+    // Only scan forward; ignore historical crossings.
+    for (let i = startIdx + 1; i < series.length; i++) {
       const s = series[i];
       if (fcBelow1 == null && s.fc != null && s.fc < 1) {
         fcBelow1 = {
-          days: daysFrom(s.date),
+          days: daysFrom(s.t),
           date: s.date
         };
       }
       if (phAbove == null && s.ph != null && s.ph > phLimit) {
         phAbove = {
-          days: daysFrom(s.date),
+          days: daysFrom(s.t),
           date: s.date
         };
       }
@@ -1019,8 +1052,7 @@ function App() {
     return {
       fcBelow1,
       phAbove,
-      phLimit,
-      startsToday: series[startIdx].date === todayIso
+      phLimit
     };
   }, [series]);
   const recs = useMemo(() => {
@@ -1300,13 +1332,19 @@ function Dashboard({
     stroke: "#eceae3",
     vertical: false
   }), /*#__PURE__*/React.createElement(XAxis, {
-    dataKey: "date",
+    dataKey: "t",
+    type: "number",
+    scale: "time",
+    domain: ["dataMin", "dataMax"],
     tick: {
       fontSize: 11,
       fill: "#8a877e"
     },
-    tickFormatter: d => d.slice(5),
-    minTickGap: 28
+    tickFormatter: t => {
+      const d = new Date(t);
+      return `${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    },
+    minTickGap: 36
   }), /*#__PURE__*/React.createElement(YAxis, {
     tick: {
       fontSize: 11,
@@ -1357,23 +1395,44 @@ function SmartDot({
   pkey
 }) {
   if (cx == null || cy == null || payload[pkey] == null) return null;
-  const m = payload._meas && payload._meas[pkey];
+  const k = payload._kind; // "meas" | "dose" | "model"
   const f = payload._future;
-  if (m) return /*#__PURE__*/React.createElement("circle", {
-    cx: cx,
-    cy: cy,
-    r: 4,
-    fill: color,
-    stroke: "#fff",
-    strokeWidth: 1.5
-  });
+  const stroke = color,
+    fill = "#ffffff";
+  if (k === "meas") {
+    // checkmark
+    const s = 5;
+    const path = `M ${cx - s} ${cy} L ${cx - s / 3} ${cy + s * 0.7} L ${cx + s} ${cy - s * 0.8}`;
+    return /*#__PURE__*/React.createElement("path", {
+      d: path,
+      stroke: stroke,
+      strokeWidth: 2,
+      fill: "none",
+      strokeLinecap: "round",
+      strokeLinejoin: "round"
+    });
+  }
+  if (k === "dose") {
+    // triangle (point up)
+    const s = 5;
+    const path = `M ${cx} ${cy - s} L ${cx + s} ${cy + s * 0.8} L ${cx - s} ${cy + s * 0.8} Z`;
+    return /*#__PURE__*/React.createElement("path", {
+      d: path,
+      stroke: stroke,
+      strokeWidth: 1.5,
+      fill: fill,
+      strokeDasharray: f ? "2 2" : "0"
+    });
+  }
+  // modeled — small open circle
   return /*#__PURE__*/React.createElement("circle", {
     cx: cx,
     cy: cy,
     r: 2.5,
-    fill: f ? "#fff" : "#fcfbf7",
-    stroke: color,
+    fill: fill,
+    stroke: stroke,
     strokeWidth: 1.4,
+    strokeDasharray: f ? "2 2" : "0",
     opacity: 0.85
   });
 }
@@ -1386,19 +1445,21 @@ function ChemTooltip({
   const d = payload[0].payload;
   const v = d[param.key];
   if (v == null) return null;
-  const m = d._meas && d._meas[param.key];
+  const dt = new Date(d.t);
+  const when = `${d.date} ${String(dt.getHours()).padStart(2, "0")}:${String(dt.getMinutes()).padStart(2, "0")}`;
+  const tag = d._kind === "meas" ? "measured" : d._kind === "dose" ? "additive applied" : d._future ? "forecast" : "modeled";
   return /*#__PURE__*/React.createElement("div", {
     style: S.tip
   }, /*#__PURE__*/React.createElement("div", {
     style: S.tipDate
-  }, d.date, d._future ? " · forecast" : ""), /*#__PURE__*/React.createElement("div", {
+  }, when), /*#__PURE__*/React.createElement("div", {
     style: {
       ...S.tipVal,
       color: param.color
     }
   }, fmt(v, param.key === "ph" || param.key === "csi" ? 2 : 1), " ", param.unit), /*#__PURE__*/React.createElement("div", {
     style: S.tipTag
-  }, m ? "measured" : "modeled", d._hasDose ? " · dose applied" : ""));
+  }, tag));
 }
 function LogTab({
   measurements,
