@@ -1316,6 +1316,8 @@ function Dashboard({
   }), " measured\xA0\xA0", /*#__PURE__*/React.createElement("span", {
     style: S.dotHollow(p.color)
   }), " modeled\xA0\xA0", /*#__PURE__*/React.createElement("span", {
+    style: S.dotHollow("#9a9890")
+  }), " additive\xA0\xA0", /*#__PURE__*/React.createElement("span", {
     style: S.shadeKey
   }), " target")), /*#__PURE__*/React.createElement(ResponsiveContainer, {
     width: "100%",
@@ -1397,40 +1399,36 @@ function SmartDot({
   if (cx == null || cy == null || payload[pkey] == null) return null;
   const k = payload._kind; // "meas" | "dose" | "model"
   const f = payload._future;
-  const stroke = color,
-    fill = "#ffffff";
   if (k === "meas") {
-    // checkmark
-    const s = 5;
-    const path = `M ${cx - s} ${cy} L ${cx - s / 3} ${cy + s * 0.7} L ${cx + s} ${cy - s * 0.8}`;
-    return /*#__PURE__*/React.createElement("path", {
-      d: path,
-      stroke: stroke,
-      strokeWidth: 2,
-      fill: "none",
-      strokeLinecap: "round",
-      strokeLinejoin: "round"
+    // filled colored dot
+    return /*#__PURE__*/React.createElement("circle", {
+      cx: cx,
+      cy: cy,
+      r: 4,
+      fill: color,
+      stroke: "#fff",
+      strokeWidth: 1.5
     });
   }
   if (k === "dose") {
-    // triangle (point up)
-    const s = 5;
-    const path = `M ${cx} ${cy - s} L ${cx + s} ${cy + s * 0.8} L ${cx - s} ${cy + s * 0.8} Z`;
-    return /*#__PURE__*/React.createElement("path", {
-      d: path,
-      stroke: stroke,
+    // grey outlined dot
+    return /*#__PURE__*/React.createElement("circle", {
+      cx: cx,
+      cy: cy,
+      r: 3.5,
+      fill: "#fff",
+      stroke: "#9a9890",
       strokeWidth: 1.5,
-      fill: fill,
       strokeDasharray: f ? "2 2" : "0"
     });
   }
-  // modeled — small open circle
+  // modeled — small colored open dot
   return /*#__PURE__*/React.createElement("circle", {
     cx: cx,
     cy: cy,
     r: 2.5,
-    fill: fill,
-    stroke: stroke,
+    fill: "#fff",
+    stroke: color,
     strokeWidth: 1.4,
     strokeDasharray: f ? "2 2" : "0",
     opacity: 0.85
