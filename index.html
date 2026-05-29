@@ -971,7 +971,21 @@ function App() {
         const bicarb_dTA = d.chem === "Sodium Bicarbonate" ? dz.ta : 0;
         const bicarb_dPH = bicarPHShift(bicarb_dTA, st.ta != null ? st.ta - bicarb_dTA : null);
         if (st.ph != null) st.ph += dz.ph + bicarb_dPH;
+        // Which params does THIS chemical actually affect? Coefficient non-zero OR bicarb pH.
+        const phMoves = a.pH !== 0 || d.chem === "Sodium Bicarbonate" && a.TA !== 0;
+        const affects = {
+          fc: a.Cl !== 0,
+          cya: a.CYA !== 0,
+          ta: a.TA !== 0,
+          ch: a.CH !== 0,
+          ph: phMoves
+        };
+        // CSI moves whenever pH, TA, CH, or CYA moves
+        affects.csi = affects.ph || affects.ta || affects.ch || affects.cya;
         hasDose = true;
+        // Stash on the event for emission below
+        ev._affects = affects;
+        ev._chem = d.chem;
       }
       // For "model" events, no state change — just emit a point at the current state.
 
@@ -991,6 +1005,8 @@ function App() {
         // "meas" | "dose" | "model"
         _meas: kind === "meas" ? mf : {},
         _hasDose: hasDose,
+        _affects: ev._affects || null,
+        _chem: ev._chem || null,
         _future: ev.t > Date.now()
       });
     });
@@ -1397,7 +1413,6 @@ function SmartDot({
   if (cx == null || cy == null || payload[pkey] == null) return null;
   const k = payload._kind; // "meas" | "dose" | "model"
   if (k === "meas") {
-    // filled colored dot
     return /*#__PURE__*/React.createElement("circle", {
       cx: cx,
       cy: cy,
@@ -1408,7 +1423,8 @@ function SmartDot({
     });
   }
   if (k === "dose") {
-    // grey outlined dot
+    // Only show the additive marker if this dose actually moves the focused parameter.
+    if (payload._affects && !payload._affects[pkey]) return null;
     return /*#__PURE__*/React.createElement("circle", {
       cx: cx,
       cy: cy,
@@ -1418,7 +1434,7 @@ function SmartDot({
       strokeWidth: 1.5
     });
   }
-  // modeled — no marker; the line itself carries the trend
+  // modeled — no marker; the line carries the trend
   return null;
 }
 function ChemTooltip({
