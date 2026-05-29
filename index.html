@@ -1314,8 +1314,6 @@ function Dashboard({
   }, /*#__PURE__*/React.createElement("span", {
     style: S.dotSolid(p.color)
   }), " measured\xA0\xA0", /*#__PURE__*/React.createElement("span", {
-    style: S.dotHollow(p.color)
-  }), " modeled\xA0\xA0", /*#__PURE__*/React.createElement("span", {
     style: S.dotHollow("#9a9890")
   }), " additive\xA0\xA0", /*#__PURE__*/React.createElement("span", {
     style: S.shadeKey
@@ -1398,7 +1396,6 @@ function SmartDot({
 }) {
   if (cx == null || cy == null || payload[pkey] == null) return null;
   const k = payload._kind; // "meas" | "dose" | "model"
-  const f = payload._future;
   if (k === "meas") {
     // filled colored dot
     return /*#__PURE__*/React.createElement("circle", {
@@ -1418,21 +1415,11 @@ function SmartDot({
       r: 3.5,
       fill: "#fff",
       stroke: "#9a9890",
-      strokeWidth: 1.5,
-      strokeDasharray: f ? "2 2" : "0"
+      strokeWidth: 1.5
     });
   }
-  // modeled — small colored open dot
-  return /*#__PURE__*/React.createElement("circle", {
-    cx: cx,
-    cy: cy,
-    r: 2.5,
-    fill: "#fff",
-    stroke: color,
-    strokeWidth: 1.4,
-    strokeDasharray: f ? "2 2" : "0",
-    opacity: 0.85
-  });
+  // modeled — no marker; the line itself carries the trend
+  return null;
 }
 function ChemTooltip({
   active,
