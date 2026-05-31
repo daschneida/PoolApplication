@@ -617,6 +617,7 @@ async function sbSave(state) {
 }
 function App() {
   const [config, setConfig] = useState({
+    name: "Houston Pool",
     volume: 19000,
     temp: 85,
     rSun: 0.45,
@@ -1185,7 +1186,7 @@ function App() {
     style: S.kicker
   }, "POOL CHEMISTRY MANAGER"), /*#__PURE__*/React.createElement("h1", {
     style: S.h1
-  }, "Houston Pool \xB7 ", config.volume.toLocaleString(), " gal")), /*#__PURE__*/React.createElement("div", {
+  }, config.name || "My Pool", " \xB7 ", Number(config.volume || 0).toLocaleString(), " gal")), /*#__PURE__*/React.createElement("div", {
     style: S.headRight
   }, /*#__PURE__*/React.createElement("div", {
     style: S.calib
@@ -1752,6 +1753,19 @@ function Settings({
   }, "Model & pool settings"), /*#__PURE__*/React.createElement("p", {
     style: S.logHint
   }, "The forecast decays chlorine by a daily fraction derived from your measured loss (loss per day \xF7 average FC over the window).", learned && learned.frac != null ? ` FC decay fraction is dynamically ${fmt(learned.frac * 100, 0)}%/day (from avg FC ${fmt(learned.avgFC)} ppm).` : ` FC decay is using the fallback fraction below until there are 2+ recent FC readings.`, learned && learned.phK != null ? ` pH drift k is dynamically ${fmt(learned.phK, 2)}/day (toward equilibrium ${fmt(config.phEq, 1)}).` : ` pH drift is using the fallback k below until there are 2+ recent pH readings.`), /*#__PURE__*/React.createElement("div", {
+    style: S.field
+  }, /*#__PURE__*/React.createElement("label", {
+    style: S.lab
+  }, "Pool name"), /*#__PURE__*/React.createElement("input", {
+    type: "text",
+    value: config.name || "",
+    placeholder: "e.g. Backyard Pool",
+    onChange: e => setConfig({
+      ...config,
+      name: e.target.value
+    }),
+    style: S.input
+  })), /*#__PURE__*/React.createElement("div", {
     className: "two-col",
     style: S.setGrid
   }, rows.map(([k, l, step]) => /*#__PURE__*/React.createElement("div", {
