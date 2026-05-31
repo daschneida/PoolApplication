@@ -893,13 +893,16 @@ function App() {
       t,
       kind: "model"
     }));
+    // Tie-break at equal timestamps: dose BEFORE measurement BEFORE model checkpoint.
+    // This matches the common "I dosed, then tested" workflow where a same-day measurement
+    // reflects the post-dose chlorine level and shouldn't get the dose stacked on top.
     events.sort((a, b) => a.t - b.t || {
-      meas: 0,
-      dose: 1,
+      dose: 0,
+      meas: 1,
       model: 2
     }[a.kind] - {
-      meas: 0,
-      dose: 1,
+      dose: 0,
+      meas: 1,
       model: 2
     }[b.kind]);
 
@@ -1017,9 +1020,37 @@ function App() {
   // contributions applied for today. If today is beyond the series, fall back to the last row.
   const latest = useMemo(() => {
     if (!series.length) return null;
+    // Anchor at the most recent past event (measurement or additive).
     const past = series.filter(s => !s._future);
-    return past.length ? past[past.length - 1] : series[0];
-  }, [series]);
+    const anchor = past.length ? past[past.length - 1] : series[0];
+    // Project the model forward from that anchor to "now" rounded to the nearest hour.
+    const nowHour = Math.round(Date.now() / HOUR) * HOUR;
+    if (nowHour <= anchor.t) return anchor; // anchor is in the future / right now
+    const days = (nowHour - anchor.t) / MS_DAY;
+    // FC: fractional decay, capped at zero
+    const fc = anchor.fc == null ? null : Math.max(0, anchor.fc * Math.pow(1 - effFrac, days));
+    // pH: drift toward equilibrium
+    const phEq = config.phEq === "" || config.phEq == null || isNaN(config.phEq) ? 8.0 : Number(config.phEq);
+    const ph = anchor.ph == null ? null : phEq - (phEq - anchor.ph) * Math.exp(-effPhK * days);
+    // CYA, TA, CH don't drift between events — carry forward
+    const cya = anchor.cya,
+      ta = anchor.ta,
+      ch = anchor.ch;
+    const cv = csi(ph, ch, ta, cya, config.temp);
+    return {
+      t: nowHour,
+      date: toLocalISO(new Date(nowHour)),
+      fc: fc == null ? null : +fc.toFixed(2),
+      ph: ph == null ? null : +ph.toFixed(2),
+      cya: cya == null ? null : +(+cya).toFixed(1),
+      ta: ta == null ? null : +(+ta).toFixed(1),
+      ch: ch == null ? null : +(+ch).toFixed(1),
+      csi: cv == null ? null : +cv.toFixed(2),
+      _kind: "model",
+      _projectedFromHours: (nowHour - anchor.t) / HOUR,
+      _anchorT: anchor.t
+    };
+  }, [series, effFrac, effPhK, config.phEq, config.temp]);
 
   // Chart display window: [today - chartDaysBack, today + chartDaysFwd], clamped to available data.
   const chartSeries = useMemo(() => {
@@ -1278,7 +1309,16 @@ function Dashboard({
         color: inR ? "#2c7a4b" : "#b23b39"
       }
     }, v == null ? "no data" : inR ? "in range" : v < rg.lo ? "low" : "high"));
-  })), /*#__PURE__*/React.createElement("div", {
+  })), latest && latest._anchorT && (() => {
+    const anchorDate = new Date(latest._anchorT);
+    const nowDate = new Date(latest.t);
+    const fmtDT = d => `${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+    const hrs = latest._projectedFromHours;
+    if (hrs < 1) return null; // anchor is essentially now, no projection note
+    return /*#__PURE__*/React.createElement("div", {
+      style: S.projNote
+    }, "Values shown are projected to ", fmtDT(nowDate), " from your last entry on ", fmtDT(anchorDate), " (", hrs < 24 ? `${Math.round(hrs)}h` : `${(hrs / 24).toFixed(1)}d`, " of model)");
+  })(), /*#__PURE__*/React.createElement("div", {
     className: "two-col",
     style: S.insightRow
   }, /*#__PURE__*/React.createElement("div", {
@@ -1931,6 +1971,14 @@ const S = {
     gridTemplateColumns: "1fr 1fr",
     gap: 8,
     marginBottom: 12
+  },
+  projNote: {
+    fontSize: 11,
+    fontFamily: "ui-monospace,monospace",
+    color: "#8a877e",
+    fontStyle: "italic",
+    marginBottom: 8,
+    padding: "2px 2px"
   },
   insight: {
     background: "#fff",
