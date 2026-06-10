@@ -353,6 +353,7 @@ function(a,b,c){if(!Vd(b))throw Error(n(200));return Wd(null,a,b,!1,c)};Q.unmoun
 const SEED = {"measurements":[{"date":"2025-02-01","temp":70.0,"fc":0.0,"cya":60.0,"ta":80.0,"ph":8.0,"ch":180.0},{"date":"2025-02-04","temp":70.0,"fc":0.0,"cya":60.0,"ta":80.0,"ph":7.4,"ch":180.0},{"date":"2025-02-05","temp":70.0,"fc":7.5,"cya":60.0,"ta":80.0,"ph":7.4,"ch":180.0},{"date":"2025-02-06","temp":70.0,"fc":7.5,"cya":60.0,"ta":80.0,"ph":7.6,"ch":180.0},{"date":"2025-02-08","temp":71.0,"fc":4.0,"cya":60.0,"ta":80.0,"ph":7.6,"ch":250.0},{"date":"2025-02-15","temp":61.0,"fc":3.0,"cya":60.0,"ta":90.0,"ph":7.4,"ch":250.0},{"date":"2025-02-16","temp":62.0,"fc":4.0,"cya":60.0,"ta":90.0,"ph":7.4,"ch":250.0},{"date":"2025-02-19","temp":56.0,"fc":4.0,"cya":50.0,"ta":90.0,"ph":7.6,"ch":210.0},{"date":"2025-02-21","temp":56.0,"fc":4.0,"cya":50.0,"ta":80.0,"ph":7.6,"ch":220.0},{"date":"2025-02-22","temp":47.0,"fc":10.0,"cya":50.0,"ta":80.0,"ph":7.8,"ch":220.0},{"date":"2025-02-23","temp":48.0,"fc":10.0,"cya":50.0,"ta":80.0,"ph":7.2,"ch":220.0},{"date":"2025-02-26","temp":60.0,"fc":9.0,"cya":50.0,"ta":80.0,"ph":7.4,"ch":220.0},{"date":"2025-03-01","temp":64.0,"fc":8.0,"cya":50.0,"ta":80.0,"ph":7.4,"ch":220.0},{"date":"2025-03-02","temp":65.0,"fc":7.0,"cya":50.0,"ta":80.0,"ph":7.4,"ch":220.0},{"date":"2025-03-04","temp":66.0,"fc":5.0,"cya":50.0,"ta":80.0,"ph":7.4,"ch":220.0},{"date":"2025-03-08","temp":65.0,"fc":4.5,"cya":50.0,"ta":70.0,"ph":7.7,"ch":250.0},{"date":"2025-03-11","temp":65.0,"fc":3.0,"cya":50.0,"ta":70.0,"ph":7.6,"ch":250.0},{"date":"2025-03-14","temp":85.0,"fc":1.0,"cya":50.0,"ta":70.0,"ph":7.7,"ch":250.0},{"date":"2025-03-15","temp":77.0,"fc":2.5,"cya":50.0,"ta":70.0,"ph":7.8,"ch":250.0},{"date":"2025-03-19","temp":72.0,"fc":1.0,"cya":50.0,"ta":70.0,"ph":7.5,"ch":250.0},{"date":"2025-03-23","temp":71.0,"fc":3.5,"cya":50.0,"ta":70.0,"ph":7.3,"ch":250.0},{"date":"2025-03-25","temp":75.0,"fc":1.5,"cya":50.0,"ta":70.0,"ph":7.4,"ch":250.0},{"date":"2025-03-28","temp":71.0,"fc":4.0,"cya":50.0,"ta":70.0,"ph":7.5,"ch":250.0},{"date":"2025-03-30","temp":75.0,"fc":2.5,"cya":50.0,"ta":70.0,"ph":7.6,"ch":250.0},{"date":"2025-03-31","temp":76.0,"fc":8.0,"cya":50.0,"ta":70.0,"ph":7.6,"ch":250.0},{"date":"2025-04-01","temp":75.0,"fc":7.0,"cya":50.0,"ta":70.0,"ph":7.7,"ch":250.0}],"doses":[{"date":"2025-02-03","chem":"Muriatic acid (14%)","oz":64.0},{"date":"2025-02-04","chem":"NaOCl (10.5 wt%)","oz":192.0},{"date":"2025-02-07","chem":"Calcium Chloride","oz":80.0},{"date":"2025-02-08","chem":"Calcium Chloride","oz":160.0},{"date":"2025-02-08","chem":"NaOCl (10.5 wt%)","oz":128.0},{"date":"2025-02-15","chem":"Muriatic acid (14%)","oz":64.0},{"date":"2025-02-16","chem":"NaOCl (10.5 wt%)","oz":64.0},{"date":"2025-02-21","chem":"NaOCl (10.5 wt%)","oz":128.0},{"date":"2025-02-22","chem":"Muriatic acid (14%)","oz":64.0},{"date":"2025-03-14","chem":"NaOCl (10.5 wt%)","oz":96.0},{"date":"2025-03-15","chem":"NaOCl (10.5 wt%)","oz":32.0},{"date":"2025-03-15","chem":"Muriatic acid (14%)","oz":64.0},{"date":"2025-03-19","chem":"Trichlor","oz":16.0},{"date":"2025-03-21","chem":"NaOCl (10.5 wt%)","oz":128.0},{"date":"2025-03-25","chem":"NaOCl (10.5 wt%)","oz":192.0},{"date":"2025-03-30","chem":"Ca(OCl)2 (59.5 wt%)","oz":24.0}]};
 </script>
 <script>
+
 function _extends() { return _extends = Object.assign ? Object.assign.bind() : function (n) { for (var e = 1; e < arguments.length; e++) { var t = arguments[e]; for (var r in t) ({}).hasOwnProperty.call(t, r) && (n[r] = t[r]); } return n; }, _extends.apply(null, arguments); }
 const {
   useState,
@@ -549,6 +550,9 @@ const bicarPHShift = (dTA, currentTA) => {
   if (!currentTA || currentTA <= 0 || !dTA || dTA <= 0) return 0;
   return Math.log10(1 + dTA / currentTA);
 };
+
+
+
 const fmt = (n, d = 1) => n == null || isNaN(n) ? "—" : Number(n).toFixed(d);
 function csi(pH, CH, TA, CYA, T) {
   if ([pH, CH, TA, CYA, T].some(v => v == null || isNaN(v))) return null;
@@ -638,7 +642,10 @@ function App() {
     chLo: 200,
     chHi: 400,
     csiLo: -0.3,
-    csiHi: 0.3
+    csiHi: 0.3,
+    sunStart: 11,
+    sunEnd: 17,
+    sunRamp: 1
   });
   const [measurements, setMeasurements] = useState([]);
   const [doses, setDoses] = useState([]);
@@ -881,19 +888,15 @@ function App() {
       kind: "dose",
       data: d
     }));
-    // 6 PM checkpoints for each day in the span (so the chart has a daily modeled cadence)
-    const sixPMs = [];
+    // 6 PM checkpoints (one per day) so the chart has a daily modeled cadence.
+    const checkpoints = [];
     const firstDay = new Date(startTs);
     firstDay.setHours(0, 0, 0, 0);
     for (let t = firstDay.getTime(); t <= endTs + MS_DAY; t += MS_DAY) {
-      const d = new Date(t);
-      d.setHours(18, 0, 0, 0); // 6:00 PM local
-      sixPMs.push(d.getTime());
+      const six = new Date(t); six.setHours(18, 0, 0, 0);
+      checkpoints.push(six.getTime());
     }
-    sixPMs.forEach(t => events.push({
-      t,
-      kind: "model"
-    }));
+    checkpoints.forEach(t => events.push({ t, kind: "model" }));
     // Tie-break at equal timestamps: dose BEFORE measurement BEFORE model checkpoint.
     // This matches the common "I dosed, then tested" workflow where a same-day measurement
     // reflects the post-dose chlorine level and shouldn't get the dose stacked on top.
@@ -927,7 +930,7 @@ function App() {
       }
       const days = (t - lastT) / MS_DAY;
       if (days > 0) {
-        // continuous-time form of fractional decay: fc*(1-f)^days
+        // FC: sun-windowed decay (concentrates the same daily fraction within sun hours)
         if (st.fc != null) st.fc = Math.max(0, st.fc * Math.pow(1 - effFrac, days));
         if (st.ph != null) {
           // ph drift toward equilibrium: ph(t) = phEq - (phEq-ph)*exp(-k*days)
@@ -1732,7 +1735,7 @@ function Settings({
     ...config,
     [k]: v === "" ? "" : Number(v)
   });
-  const rows = [["volume", "Pool volume (gal)", 1], ["temp", "Default water temp (°F)", 1], ["rSun", "Fallback loss fraction (per day)", 0.01], ["phEq", "pH equilibrium", 0.1], ["phK", "pH drift speed", 0.05], ["chartDaysBack", "Chart range: days back", 1], ["chartDaysFwd", "Chart range: days forward", 1], ["lossWindow", "Chlorine loss window (days)", 1]];
+  const rows = [["volume", "Pool volume (gal)", 1], ["temp", "Default water temp (°F)", 1], ["rSun", "Fallback loss fraction (per day)", 0.01], ["phEq", "pH equilibrium", 0.1], ["phK", "pH drift speed", 0.05], ["chartDaysBack", "Chart range: days back", 1], ["chartDaysFwd", "Chart range: days forward", 1], ["lossWindow", "Chlorine loss window (days)", 1], ["sunStart", "Sun start (hour, 0-24)", 0.5], ["sunEnd", "Sun end (hour, 0-24)", 0.5], ["sunRamp", "Sun ramp duration (hours)", 0.25]];
   const targets = [["Free chlorine (ppm)", "fcLo", "fcHi", 0.5], ["pH", "phLo", "phHi", 0.1], ["Cyanuric acid (ppm)", "cyaLo", "cyaHi", 5], ["Calcium hardness (ppm)", "chLo", "chHi", 10], ["Alkalinity (ppm)", "taLo", "taHi", 10], ["Saturation index (CSI)", "csiLo", "csiHi", 0.1]];
   const canSuggest = latestCya != null && !isNaN(latestCya) && latestCya > 0;
   const suggestFC = () => {
@@ -2370,6 +2373,7 @@ const S = {
   })
 };
 ReactDOM.createRoot(document.getElementById("root")).render(/*#__PURE__*/React.createElement(App, null));
+
 </script>
 </body>
 </html>
