@@ -554,14 +554,35 @@ const bicarPHShift = (dTA, currentTA) => {
 
 
 const fmt = (n, d = 1) => n == null || isNaN(n) ? "—" : Number(n).toFixed(d);
-function csi(pH, CH, TA, CYA, T) {
-  if ([pH, CH, TA, CYA, T].some(v => v == null || isNaN(v))) return null;
-  const adj = TA - CYA / 3;
-  if (CH <= 0 || adj <= 0) return null;
-  const CF = 0.4331 * Math.log(CH) - 0.3865;
-  const AF = 0.4401 * Math.log(adj) - 0.0161;
-  const TF = -0.00006 * T * T + 0.0189 * T - 0.5338;
-  return pH + CF + AF + TF - 12.1;
+// Calcite Saturation Index — TFP formula (https://www.troublefreepool.com/wiki/CSI_and_LSI).
+// More rigorous than the older Langelier form: uses pH-dependent CYA correction (acid
+// dissociation, not a fixed CYA/3), an explicit ionic-strength activity term (Davies),
+// and the van 't Hoff temperature dependence (1/Kelvin). Salt and Borate default to 0
+// for fresh-water pools without those additives.
+function csi(pH, CH, TA, CYA, T_F, Salt, Borate) {
+  if ([pH, CH, TA, CYA, T_F].some(v => v == null || isNaN(v))) return null;
+  if (CH <= 0 || TA <= 0) return null;
+  const salt = Salt || 0;
+  const borate = Borate || 0;
+  // 1. Carbonate alkalinity (pH-dependent CYA & borate corrections)
+  const CarbAlk = TA - (0.38772 * CYA) / (1 + Math.pow(10, 6.83 - pH))
+                     - (4.63 * borate) / (1 + Math.pow(10, 9.11 - pH));
+  if (CarbAlk <= 0) return null;
+  // 2. Excess NaCl above what calcium hardness contributes
+  const extra_NaCl = Math.max(0, salt - 1.1678 * CH);
+  // 3. Ionic strength (Davies form)
+  const Ionic = (1.5 * CH + TA) / 50045 + extra_NaCl / 58440;
+  // 4. Temperature: convert °F -> Kelvin
+  const T_K = (T_F - 32) * 5 / 9 + 273.15;
+  // Main TFP CSI formula
+  const sqrtI = Math.sqrt(Ionic);
+  const ionicTerm = (2.56 * sqrtI) / (1 + 1.65 * sqrtI);
+  return pH - 11.677
+       + Math.log10(CH)
+       + Math.log10(CarbAlk)
+       - ionicTerm
+       - 1412.5 / T_K
+       + 4.7375;
 }
 function decayFC(fc, frac) {
   if (fc == null) return null;
@@ -1346,7 +1367,15 @@ function Dashboard({
     style: S.insightK
   }, "Water balance (CSI)"), /*#__PURE__*/React.createElement("div", {
     style: S.insightV
-  }, latest?.csi == null ? "Need all 5 inputs to compute" : latest.csi < rangeOf("csi").lo ? /*#__PURE__*/React.createElement("span", null, "Corrosive (", fmt(latest.csi, 2), ") \u2014 raise pH/alkalinity/calcium") : latest.csi > rangeOf("csi").hi ? /*#__PURE__*/React.createElement("span", null, "Scaling (", fmt(latest.csi, 2), ") \u2014 lower pH/alkalinity") : /*#__PURE__*/React.createElement("span", null, "Balanced (", fmt(latest.csi, 2), ") \u2713")))), recs.length > 0 && /*#__PURE__*/React.createElement("div", {
+  }, latest?.csi == null ? "Need all 5 inputs to compute" : (() => {
+    const c = latest.csi;
+    const v = fmt(c, 2);
+    if (c <= -0.6) return /*#__PURE__*/React.createElement("span", null, "Corrosive (", v, ") \u2014 plaster damage likely; raise pH/alkalinity/calcium");
+    if (c <= -0.3) return /*#__PURE__*/React.createElement("span", null, "Slightly corrosive (", v, ") \u2014 trending corrosive; raise pH/alkalinity/calcium");
+    if (c <  0.3)  return /*#__PURE__*/React.createElement("span", null, "Balanced (", v, ") \u2713");
+    if (c <  0.6)  return /*#__PURE__*/React.createElement("span", null, "Slightly scaling (", v, ") \u2014 trending scale-forming; lower pH/alkalinity");
+    return /*#__PURE__*/React.createElement("span", null, "Scaling (", v, ") \u2014 scale likely; lower pH/alkalinity");
+  })()))), recs.length > 0 && /*#__PURE__*/React.createElement("div", {
     style: S.recBox
   }, /*#__PURE__*/React.createElement("div", {
     style: S.recTitle
