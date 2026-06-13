@@ -592,6 +592,25 @@ function decayFC(fc, frac) {
 function driftPH(ph, eq, k) {
   return ph == null ? null : ph + (eq - ph) * (1 - Math.exp(-k));
 }
+
+// Predict pH equilibrium from open-system carbonate chemistry.
+// Atmospheric CO2 fixes dissolved CO2 (Henry's law); current TA, CYA, and temperature
+// then set where the carbonate buffer balances. Returns null if inputs are insufficient.
+// Reality caveat: real pools with aeration (waterfalls, jets) sit 0.1-0.2 higher than
+// this prediction because aeration drives CO2 below atmospheric equilibrium.
+function predictPhEq(TA, CYA, pH_current, T_F) {
+  if (TA == null || TA <= 0 || pH_current == null || T_F == null) return null;
+  // pH-dependent CYA contribution to alkalinity, subtract to get carbonate alk
+  const CarbAlk_ppm = TA - (0.38772 * (CYA || 0)) / (1 + Math.pow(10, 6.83 - pH_current));
+  if (CarbAlk_ppm <= 0) return null;
+  const CarbAlk_M = CarbAlk_ppm * 2e-5;  // ppm as CaCO3 -> mol/L bicarbonate equiv
+  const T_C = (T_F - 32) * 5 / 9;
+  const T_K = T_C + 273.15;
+  const pK1 = 6.498 - 0.0058 * T_C;       // Plummer & Busenberg linear approx
+  const KH = 0.0334 * Math.exp(2400 * (1 / T_K - 1 / 298.15));  // Henry constant, van 't Hoff
+  const CO2_M = KH * 420e-6;              // 420 ppm atmospheric CO2
+  return pK1 + Math.log10(CarbAlk_M / CO2_M);
+}
 const LS_KEY = "pool_chem_webapp_v1";
 
 /* ============================================================
@@ -647,7 +666,7 @@ function App() {
     temp: 85,
     rSun: 0.45,
     demand: 1.2,
-    phEq: 8.0,
+    phEq: "",
     phK: 0.55,
     chartDaysBack: 21,
     chartDaysFwd: 7,
@@ -752,10 +771,28 @@ function App() {
       return () => clearTimeout(id);
     }
   }, [config, measurements, doses, loaded]);
+  // pH equilibrium: manual override if set, else predicted from chemistry of latest reading.
+  const effPhEqInfo = useMemo(() => {
+    const override = config.phEq;
+    const hasOverride = override !== "" && override != null && !isNaN(override);
+    if (hasOverride) return { value: Number(override), source: "override" };
+    // Use the most recent measurement that has the inputs we need
+    const recentMs = measurements
+      .filter(m => m.ta != null && m.ph != null)
+      .sort((a, b) => tsOf(b) - tsOf(a));
+    const m = recentMs[0];
+    if (m) {
+      const pred = predictPhEq(m.ta, m.cya, m.ph, m.temp || config.temp || 85);
+      if (pred != null && isFinite(pred)) return { value: pred, source: "predicted" };
+    }
+    return { value: 8.0, source: "default" };
+  }, [config.phEq, config.temp, measurements]);
+  const effPhEq = effPhEqInfo.value;
+
   const learned = useMemo(() => {
     const win = config.lossWindow === "" || config.lossWindow == null || isNaN(config.lossWindow) ? 14 : Number(config.lossWindow);
     const cutoff = Date.now() - win * MS_DAY;
-    const phEq = config.phEq === "" || config.phEq == null || isNaN(config.phEq) ? 8.0 : Number(config.phEq);
+    const phEq = effPhEq;
 
     // ============== CHLORINE (FC) ==============
     const fcMs = measurements.filter(m => m.fc != null).slice().sort((a, b) => tsOf(a) - tsOf(b));
@@ -884,7 +921,7 @@ function App() {
       phIntervals,
       phEq
     };
-  }, [measurements, doses, config.volume, config.lossWindow, config.phEq]);
+  }, [measurements, doses, config.volume, config.lossWindow, effPhEq]);
 
   // Forecast parameters: dynamic when available, else the Settings fallback.
   const effFrac = learned && learned.frac != null ? learned.frac : config.rSun || 0.45;
@@ -955,7 +992,7 @@ function App() {
         if (st.fc != null) st.fc = Math.max(0, st.fc * Math.pow(1 - effFrac, days));
         if (st.ph != null) {
           // ph drift toward equilibrium: ph(t) = phEq - (phEq-ph)*exp(-k*days)
-          st.ph = config.phEq - (config.phEq - st.ph) * Math.exp(-effPhK * days);
+          st.ph = effPhEq - (effPhEq - st.ph) * Math.exp(-effPhK * days);
         }
       }
       lastT = t;
@@ -1055,7 +1092,7 @@ function App() {
     // FC: fractional decay, capped at zero
     const fc = anchor.fc == null ? null : Math.max(0, anchor.fc * Math.pow(1 - effFrac, days));
     // pH: drift toward equilibrium
-    const phEq = config.phEq === "" || config.phEq == null || isNaN(config.phEq) ? 8.0 : Number(config.phEq);
+    const phEq = effPhEq;
     const ph = anchor.ph == null ? null : phEq - (phEq - anchor.ph) * Math.exp(-effPhK * days);
     // CYA, TA, CH don't drift between events — carry forward
     const cya = anchor.cya,
@@ -1075,7 +1112,7 @@ function App() {
       _projectedFromHours: (nowHour - anchor.t) / HOUR,
       _anchorT: anchor.t
     };
-  }, [series, effFrac, effPhK, config.phEq, config.temp]);
+  }, [series, effFrac, effPhK, effPhEq, config.temp]);
 
   // Chart display window: [today - chartDaysBack, today + chartDaysFwd], clamped to available data.
   const chartSeries = useMemo(() => {
@@ -1251,7 +1288,9 @@ function App() {
     config,
     learned,
     effFrac,
-    effPhK
+    effPhK,
+    effPhEq,
+    effPhEqInfo
   }), tab === "log" && /*#__PURE__*/React.createElement(LogTab, {
     measurements,
     setMeasurements,
@@ -1263,6 +1302,8 @@ function App() {
     config,
     setConfig,
     learned,
+    effPhEq,
+    effPhEqInfo,
     latestCya: latest ? latest.cya : null,
     onReset: () => {
       setMeasurements([]);
@@ -1274,7 +1315,7 @@ function App() {
     }
   }), /*#__PURE__*/React.createElement("footer", {
     style: S.footer
-  }, "FC decay: ", learned && learned.frac != null ? `dynamic ${fmt(learned.frac * 100, 0)}%/day (from measured loss ÷ avg FC)` : `fallback ${fmt((config.rSun || 0.45) * 100, 0)}%/day`, ". pH drift: ", learned && learned.phK != null ? `dynamic k=${fmt(learned.phK, 2)}/day toward ${fmt(config.phEq, 1)} (learned from your pH readings & dose history)` : `fallback k=${fmt(config.phK || 0.55, 2)}/day`, ". Additive coefficients & CSI equation from your spreadsheet. ", SYNC_ON ? "Synced across your devices via Supabase; Export CSV for an extra backup." : "Data saved in this browser; use Export CSV to back it up."));
+  }, "FC decay: ", learned && learned.frac != null ? `dynamic ${fmt(learned.frac * 100, 0)}%/day (from measured loss ÷ avg FC)` : `fallback ${fmt((config.rSun || 0.45) * 100, 0)}%/day`, ". pH drift: ", learned && learned.phK != null ? `dynamic k=${fmt(learned.phK, 2)}/day toward ${fmt(effPhEq, 2)} (${effPhEqInfo.source==="override"?"override":effPhEqInfo.source==="predicted"?"predicted":"default"}; learned from your pH readings & dose history)` : `fallback k=${fmt(config.phK || 0.55, 2)}/day toward ${fmt(effPhEq, 2)} (${effPhEqInfo.source})`, ". Additive coefficients & CSI equation from your spreadsheet. ", SYNC_ON ? "Synced across your devices via Supabase; Export CSV for an extra backup." : "Data saved in this browser; use Export CSV to back it up."));
 }
 function Dashboard({
   series,
@@ -1287,7 +1328,9 @@ function Dashboard({
   config,
   learned,
   effFrac,
-  effPhK
+  effPhK,
+  effPhEq,
+  effPhEqInfo
 }) {
   const p = PARAMS.find(x => x.key === focus);
   const measuredPts = chartSeries.filter(s => s._meas && s._meas[focus]);
@@ -1471,7 +1514,7 @@ function Dashboard({
       factor = isDyn ? `decay factor ${pct}%/day (dynamic, from your readings)` : `decay factor ${pct}%/day (fallback — needs 2+ recent FC readings)`;
     } else if (focus === "ph") {
       const k = fmt(effPhK, 2);
-      factor = isDyn ? `drift factor k=${k}/day toward pH ${fmt(config.phEq, 1)} (dynamic, from your readings)` : `drift factor k=${k}/day toward pH ${fmt(config.phEq, 1)} (fallback — needs 2+ recent pH readings)`;
+      factor = isDyn ? `drift factor k=${k}/day toward pH ${fmt(effPhEq, 2)} (dynamic, from your readings)` : `drift factor k=${k}/day toward pH ${fmt(effPhEq, 2)} (fallback — needs 2+ recent pH readings)`;
     }
     return /*#__PURE__*/React.createElement(React.Fragment, null, measuredPts.length, " measured point", measuredPts.length !== 1 ? "s" : "", " in view \xB7 window: ", config.chartDaysBack === "" ? 21 : config.chartDaysBack, " days back to ", config.chartDaysFwd === "" ? 7 : config.chartDaysFwd, " days ahead", factor ? /*#__PURE__*/React.createElement(React.Fragment, null, " \xB7 ", factor) : null);
   })())));
@@ -1756,6 +1799,8 @@ function Settings({
   config,
   setConfig,
   learned,
+  effPhEq,
+  effPhEqInfo,
   latestCya,
   onReset,
   onReseed
@@ -1784,7 +1829,7 @@ function Settings({
     style: S.logH
   }, "Model & pool settings"), /*#__PURE__*/React.createElement("p", {
     style: S.logHint
-  }, "The forecast decays chlorine by a daily fraction derived from your measured loss (loss per day \xF7 average FC over the window).", learned && learned.frac != null ? ` FC decay fraction is dynamically ${fmt(learned.frac * 100, 0)}%/day (from avg FC ${fmt(learned.avgFC)} ppm).` : ` FC decay is using the fallback fraction below until there are 2+ recent FC readings.`, learned && learned.phK != null ? ` pH drift k is dynamically ${fmt(learned.phK, 2)}/day (toward equilibrium ${fmt(config.phEq, 1)}).` : ` pH drift is using the fallback k below until there are 2+ recent pH readings.`), /*#__PURE__*/React.createElement("div", {
+  }, "The forecast decays chlorine by a daily fraction derived from your measured loss (loss per day \xF7 average FC over the window).", learned && learned.frac != null ? ` FC decay fraction is dynamically ${fmt(learned.frac * 100, 0)}%/day (from avg FC ${fmt(learned.avgFC)} ppm).` : ` FC decay is using the fallback fraction below until there are 2+ recent FC readings.`, learned && learned.phK != null ? ` pH drift k is dynamically ${fmt(learned.phK, 2)}/day (toward equilibrium ${fmt(effPhEq, 2)}, ${effPhEqInfo.source}).` : ` pH drift is using the fallback k below until there are 2+ recent pH readings (toward equilibrium ${fmt(effPhEq, 2)}, ${effPhEqInfo.source}).`), /*#__PURE__*/React.createElement("div", {
     style: S.field
   }, /*#__PURE__*/React.createElement("label", {
     style: S.lab
