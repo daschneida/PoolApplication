@@ -1290,7 +1290,8 @@ function App() {
     effFrac,
     effPhK,
     effPhEq,
-    effPhEqInfo
+    effPhEqInfo,
+    lastMeasTs: measurements.length ? Math.max(...measurements.map(tsOf)) : null
   }), tab === "log" && /*#__PURE__*/React.createElement(LogTab, {
     measurements,
     setMeasurements,
@@ -1330,7 +1331,8 @@ function Dashboard({
   effFrac,
   effPhK,
   effPhEq,
-  effPhEqInfo
+  effPhEqInfo,
+  lastMeasTs
 }) {
   const p = PARAMS.find(x => x.key === focus);
   const measuredPts = chartSeries.filter(s => s._meas && s._meas[focus]);
@@ -1345,7 +1347,22 @@ function Dashboard({
     };
   };
   const pRange = rangeOf(focus);
-  return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+  // Measurement reminder: gentle after 3 days, urgent after 5 days.
+  // Returns null (no banner), or a React element banner.
+  const reminderBanner = (() => {
+    if (lastMeasTs == null) return null;
+    const daysSince = (Date.now() - lastMeasTs) / MS_DAY;
+    if (daysSince < 3) return null;
+    const isUrgent = daysSince >= 5;
+    const dayText = daysSince < 1 ? "today" : daysSince < 2 ? "yesterday" : `${Math.floor(daysSince)} days ago`;
+    const message = isUrgent
+      ? `It's been ${Math.floor(daysSince)} days since your last measurement. The forecast becomes less reliable without recent data — please log a reading soon.`
+      : `Your last measurement was ${dayText}. Consider logging a fresh reading to keep the forecast accurate.`;
+    return /*#__PURE__*/React.createElement("div", {
+      style: isUrgent ? S.reminderUrgent : S.reminderGentle
+    }, message);
+  })();
+  return /*#__PURE__*/React.createElement("div", null, reminderBanner, /*#__PURE__*/React.createElement("div", {
     style: S.cards
   }, PARAMS.map(par => {
     const v = latest ? latest[par.key] : null;
@@ -2110,6 +2127,25 @@ const S = {
     gap: 10,
     padding: "3px 0",
     flexWrap: "wrap"
+  },
+  reminderGentle: {
+    background: "#fdf7e8",
+    border: "1px solid #e8d49a",
+    borderRadius: 10,
+    padding: "10px 14px",
+    marginBottom: 14,
+    color: "#7a5d18",
+    fontSize: 14
+  },
+  reminderUrgent: {
+    background: "#fbece8",
+    border: "1px solid #e2a497",
+    borderRadius: 10,
+    padding: "10px 14px",
+    marginBottom: 14,
+    color: "#933b22",
+    fontSize: 14,
+    fontWeight: 500
   },
   recDose: {
     fontWeight: 600,
