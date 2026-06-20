@@ -1968,7 +1968,9 @@ function Settings({
     value: config[k],
     onChange: e => upd(k, e.target.value),
     style: S.input
-  })))), /*#__PURE__*/React.createElement("h4", {
+  }), k === "phEq" && effPhEqInfo ? /*#__PURE__*/React.createElement("div", {
+    style: { fontSize: 12, color: "#7a6f5a", marginTop: 4, fontStyle: "italic" }
+  }, `currently ${fmt(effPhEq, 2)} (${effPhEqInfo.source})`) : null))), /*#__PURE__*/React.createElement("h4", {
     style: S.subH
   }, "Target ranges"), /*#__PURE__*/React.createElement("p", {
     style: S.logHint
