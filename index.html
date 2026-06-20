@@ -1002,6 +1002,29 @@ function App() {
       const six = new Date(t); six.setHours(18, 0, 0, 0);
       checkpoints.push(six.getTime());
     }
+    // Pre-sun and post-sun checkpoints to give the chart its stair-step appearance.
+    // Bounded to the visible chart window only (default ~28 days = ~56 extra points)
+    // so we never iterate full history. Each checkpoint is just a state-sampling point;
+    // the decay math is the same sun-day model from step 3.
+    const sunStartH = Number(config.sunStart);
+    const sunEndH = Number(config.sunEnd);
+    if (isFinite(sunStartH) && isFinite(sunEndH) && sunEndH > sunStartH) {
+      const nowMs = Date.now();
+      const winLo = nowMs - (+config.chartDaysBack || 21) * MS_DAY;
+      const winHi = nowMs + (+config.chartDaysFwd || 7) * MS_DAY;
+      const windowFirstDay = new Date(Math.max(winLo, startTs));
+      windowFirstDay.setHours(0, 0, 0, 0);
+      const windowLastDay = Math.min(winHi, endTs + MS_DAY);
+      for (let t = windowFirstDay.getTime(); t <= windowLastDay; t += MS_DAY) {
+        const day = new Date(t); day.setHours(0, 0, 0, 0);
+        // pre-sun: 5 min before sunStart
+        const pre = day.getTime() + sunStartH * 3600000 - 5 * 60000;
+        if (pre >= winLo && pre <= winHi) checkpoints.push(pre);
+        // post-sun: 5 min after sunEnd
+        const post = day.getTime() + sunEndH * 3600000 + 5 * 60000;
+        if (post >= winLo && post <= winHi) checkpoints.push(post);
+      }
+    }
     checkpoints.forEach(t => events.push({ t, kind: "model" }));
     // Tie-break at equal timestamps: dose BEFORE measurement BEFORE model checkpoint.
     // This matches the common "I dosed, then tested" workflow where a same-day measurement
