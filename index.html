@@ -1257,7 +1257,26 @@ function App() {
     style: S.calibVal
   }, learned && learned.totalLoss != null ? fmt(learned.totalLoss) : "—", " ppm/day"), /*#__PURE__*/React.createElement("span", {
     style: S.calibNote
-  }, learned && learned.totalLoss != null ? `over ${learned.spanDays >= 1 ? Math.round(learned.spanDays) : learned.spanDays.toFixed(1)} days · ${learned.n} readings (last ${learned.win}d window)` : `need 2+ readings in last ${config.lossWindow || 14} days`)), /*#__PURE__*/React.createElement("div", {
+  }, learned && learned.totalLoss != null ? `over ${learned.spanDays >= 1 ? Math.round(learned.spanDays) : learned.spanDays.toFixed(1)} days · ${learned.n} readings (last ${learned.win}d window)` : `need 2+ readings in last ${config.lossWindow || 14} days`), (() => {
+    // Sun-hour half-life: if the calendar-day fraction f is all lost during the W-hour
+    // sun window, then (1-f) = exp(-k_hr · W), so k_hr = -ln(1-f) / W per sun-hour.
+    // Half-life t½ = ln(2) / k_hr. Display-only; no model change.
+    if (!learned || learned.frac == null) return null;
+    const sunStart = Number(config.sunStart);
+    const sunEnd = Number(config.sunEnd);
+    if (!isFinite(sunStart) || !isFinite(sunEnd)) return null;
+    const W = sunEnd - sunStart;
+    if (!(W > 0 && W < 24)) return null;
+    const f = Math.max(0, Math.min(0.95, learned.frac));
+    if (f <= 0) return null;
+    const k_per_hour = -Math.log(1 - f) / W;
+    if (!(k_per_hour > 0) || !isFinite(k_per_hour)) return null;
+    const halfLife = Math.log(2) / k_per_hour;
+    const text = halfLife < 10 ? halfLife.toFixed(1) : Math.round(halfLife).toString();
+    return /*#__PURE__*/React.createElement("span", {
+      style: { ...S.calibNote, fontStyle: "italic", marginTop: 2 }
+    }, `sun-hour half-life \u2248 ${text} h`);
+  })()), /*#__PURE__*/React.createElement("div", {
     style: S.syncCol
   }, /*#__PURE__*/React.createElement("span", {
     style: {
