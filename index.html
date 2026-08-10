@@ -592,6 +592,33 @@ function csi(pH, CH, TA, CYA, T_F, Salt, Borate) {
        - 1412.5 / T_K
        + 4.7375;
 }
+// Solve for the total alkalinity that produces a target CSI, holding pH/CH/CYA/temp
+// fixed. CSI is monotonically increasing in TA over realistic ranges, so bisection
+// is safe. Returns null if no solution exists in [1, 500] ppm (e.g. CYA too high
+// relative to CH/temp for this target to be reachable at any TA).
+function taForCSI(target, pH, CH, CYA, T_F) {
+  if ([target, pH, CH, CYA, T_F].some(v => v == null || isNaN(v))) return null;
+  let lo = 1, hi = 500;
+  const g = ta => { const v = csi(pH, CH, ta, CYA, T_F); return v == null ? -99 : v; };
+  if (g(lo) - target > 0 || g(hi) - target < 0) return null;
+  for (let i = 0; i < 40; i++) {
+    const mid = (lo + hi) / 2;
+    if (g(mid) - target > 0) hi = mid; else lo = mid;
+  }
+  return (lo + hi) / 2;
+}
+// Same idea, solving for calcium hardness instead. Also monotonic increasing in CH.
+function chForCSI(target, pH, TA, CYA, T_F) {
+  if ([target, pH, TA, CYA, T_F].some(v => v == null || isNaN(v))) return null;
+  let lo = 25, hi = 2000;
+  const g = ch => { const v = csi(pH, ch, TA, CYA, T_F); return v == null ? -99 : v; };
+  if (g(lo) - target > 0 || g(hi) - target < 0) return null;
+  for (let i = 0; i < 40; i++) {
+    const mid = (lo + hi) / 2;
+    if (g(mid) - target > 0) hi = mid; else lo = mid;
+  }
+  return (lo + hi) / 2;
+}
 function decayFC(fc, frac) {
   if (fc == null) return null;
   const f = Math.max(0, Math.min(0.95, frac || 0));
@@ -1365,7 +1392,7 @@ function App() {
     style: S.exportBtn
   }, "\u2193 Export CSV")))), /*#__PURE__*/React.createElement("nav", {
     style: S.tabs
-  }, ["dashboard", "log", "settings"].map(t => /*#__PURE__*/React.createElement("button", {
+  }, ["dashboard", "log", "advisor", "settings"].map(t => /*#__PURE__*/React.createElement("button", {
     key: t,
     onClick: () => setTab(t),
     style: {
@@ -1394,6 +1421,12 @@ function App() {
     setDoses,
     config,
     latest
+  }), tab === "advisor" && /*#__PURE__*/React.createElement(Advisor, {
+    measurements,
+    latest,
+    config,
+    learned,
+    effFrac
   }), tab === "settings" && /*#__PURE__*/React.createElement(Settings, {
     config,
     setConfig,
@@ -1907,6 +1940,172 @@ function LogTab({
     style: S.del
   }, "\xD7"))))));
 }
+function Advisor({
+  measurements,
+  latest,
+  config,
+  learned,
+  effFrac
+}) {
+  const chLatest = latest ? latest.ch : null;
+  const taLatest = latest ? latest.ta : null;
+  const phLatest = latest ? latest.ph : null;
+  const cyaLatest = latest ? latest.cya : null;
+  const tempFromLog = (() => {
+    const withTemp = measurements.filter(m => m.temp != null).slice().sort((a, b) => tsOf(a) - tsOf(b));
+    return withTemp.length ? Number(withTemp[withTemp.length - 1].temp) : null;
+  })();
+  const defaultTemp = tempFromLog != null ? tempFromLog : config.temp;
+  const [tempOverride, setTempOverride] = useState("");
+  const [chOverride, setChOverride] = useState("");
+  const T_F = tempOverride !== "" && !isNaN(tempOverride) ? Number(tempOverride) : defaultTemp;
+  const CH = chOverride !== "" && !isNaN(chOverride) ? Number(chOverride) : chLatest;
+  const CYA = cyaLatest;
+  const numOr = (v, d) => v === "" || v == null || isNaN(v) ? d : Number(v);
+  const phMid = (numOr(config.phLo, 7.4) + numOr(config.phHi, 7.8)) / 2;
+  const csiLo = numOr(config.csiLo, -0.3);
+  const csiHi = numOr(config.csiHi, 0.3);
+  const csiMid = (csiLo + csiHi) / 2;
+  const ready = [CH, CYA, T_F].every(v => v != null && !isNaN(v));
+
+  const taLo = ready ? taForCSI(csiLo, phMid, CH, CYA, T_F) : null;
+  const taHi = ready ? taForCSI(csiHi, phMid, CH, CYA, T_F) : null;
+
+  const frac = effFrac != null ? effFrac : config.rSun || 0.45;
+  const seasonalT = Math.max(0, Math.min(1, frac / 0.5));
+  const taTarget = taLo != null && taHi != null ? taHi - seasonalT * (taHi - taLo) : null;
+  const seasonLabel = frac < 0.15 ? "low \u2014 winter-like" : frac < 0.3 ? "moderate" : "high \u2014 summer-like";
+
+  const chNeeded = ready && taTarget != null ? chForCSI(csiMid, phMid, taTarget, CYA, T_F) : null;
+  const chGapOk = chNeeded == null || CH == null ? true : Math.abs(chNeeded - CH) < 15;
+  const inBox = taLatest != null && taLo != null && taHi != null && taLatest >= taLo && taLatest <= taHi;
+
+  const taDose = (() => {
+    if (taLatest == null || taTarget == null) return null;
+    const delta = taTarget - taLatest;
+    if (Math.abs(delta) < 3) return null;
+    if (delta < 0) {
+      const add = ADDITIVES["Muriatic acid (14%)"];
+      const oz = Math.round(Math.abs(delta) * config.volume / Math.abs(add.TA));
+      const dPh = add.pH * oz / config.volume;
+      return {
+        chem: "Muriatic acid (14%)",
+        oz,
+        note: "lowers TA toward " + fmt(taTarget, 0) + " ppm; also drops pH by about " + fmt(Math.abs(dPh), 2) + ", from " + fmt(phLatest, 2) + " toward " + fmt((phLatest == null ? phMid : phLatest) + dPh, 2)
+      };
+    }
+    const add = ADDITIVES["Sodium Bicarbonate"];
+    const oz = Math.round(delta * config.volume / add.TA);
+    const dPh = taLatest > 0 ? bicarPHShift(delta, taLatest) : 0;
+    return {
+      chem: "Sodium Bicarbonate",
+      oz,
+      note: "raises TA toward " + fmt(taTarget, 0) + " ppm; also lifts pH by about " + fmt(dPh, 2) + ", from " + fmt(phLatest, 2) + " toward " + fmt((phLatest == null ? phMid : phLatest) + dPh, 2)
+    };
+  })();
+
+  const chDose = (() => {
+    if (chGapOk || chNeeded == null || CH == null) return null;
+    const delta = chNeeded - CH;
+    if (delta <= 0) {
+      return { note: "current calcium hardness is already above what's needed here \u2014 no product lowers CH short of diluting the water, so leave it as is." };
+    }
+    const add = ADDITIVES["Calcium Chloride"];
+    const oz = Math.round(delta * config.volume / add.CH);
+    return {
+      chem: "Calcium Chloride",
+      oz,
+      note: "brings CH to about " + fmt(chNeeded, 0) + " ppm, centering CSI at the target TA"
+    };
+  })();
+
+  const conditionsCard = /*#__PURE__*/React.createElement("div", { style: S.insight },
+    /*#__PURE__*/React.createElement("div", { style: S.insightK }, "Current conditions"),
+    /*#__PURE__*/React.createElement("div", { style: S.whatIfRow },
+      /*#__PURE__*/React.createElement("div", { style: S.whatIfField },
+        /*#__PURE__*/React.createElement("label", { style: S.targetLabel }, "Water temp (\u00B0F)"),
+        /*#__PURE__*/React.createElement("input", {
+          type: "number",
+          style: S.inputSm,
+          placeholder: fmt(defaultTemp, 0),
+          value: tempOverride,
+          onChange: e => setTempOverride(e.target.value)
+        })
+      ),
+      /*#__PURE__*/React.createElement("div", { style: S.whatIfField },
+        /*#__PURE__*/React.createElement("label", { style: S.targetLabel }, "Calcium hardness (ppm)"),
+        /*#__PURE__*/React.createElement("input", {
+          type: "number",
+          style: S.inputSm,
+          placeholder: fmt(chLatest, 0),
+          value: chOverride,
+          onChange: e => setChOverride(e.target.value)
+        })
+      ),
+      /*#__PURE__*/React.createElement("div", { style: S.whatIfField },
+        /*#__PURE__*/React.createElement("span", { style: S.targetLabel }, "Chlorine loss rate"),
+        /*#__PURE__*/React.createElement("div", { style: { fontSize: 15, marginTop: 4 } },
+          learned && learned.totalLoss != null ? fmt(learned.totalLoss) + " ppm/day \u00B7 " + fmt(frac * 100, 0) + "%/day" : fmt(frac * 100, 0) + "%/day (fallback)",
+          /*#__PURE__*/React.createElement("span", { style: { color: "#9a9890", fontStyle: "italic", marginLeft: 6, fontSize: 12 } }, seasonLabel)
+        )
+      )
+    ),
+    /*#__PURE__*/React.createElement("div", { style: { fontSize: 12, color: "#9a9890", fontStyle: "italic", marginTop: 8 } }, "Leave temp or CH blank to use your latest log entry. Override either to test a what-if.")
+  );
+
+  const notReadyCard = /*#__PURE__*/React.createElement("div", { style: S.reminderGentle }, "Need CH, CYA and a temperature reading to compute a target \u2014 log a full measurement first.");
+
+  const boxText = (taLo == null || taHi == null)
+    ? "No TA hits your CSI target at this CH/temperature \u2014 CYA is too high relative to them."
+    : fmt(taLo, 0) + "\u2013" + fmt(taHi, 0) + " ppm keeps CSI within " + fmt(csiLo, 1) + " to " + fmt(csiHi, 1) + " at " + fmt(T_F, 0) + "\u00B0F and CH " + fmt(CH, 0) + ".";
+  const aimLine = (taLo != null && taHi != null) ? /*#__PURE__*/React.createElement("div", { style: { marginTop: 6 } }, "Given your ", seasonLabel, " chlorine loss, aim near ", /*#__PURE__*/React.createElement("b", null, fmt(taTarget, 0) + " ppm"), ".") : null;
+  const statusText = taLatest == null ? "No current TA logged." : inBox ? "Current TA (" + fmt(taLatest, 0) + ") is inside the box." : "Current TA (" + fmt(taLatest, 0) + ") is " + (taLatest < taLo ? "below" : "above") + " the box.";
+  const statusLine = (taLo != null && taHi != null) ? /*#__PURE__*/React.createElement("div", { style: { marginTop: 6, fontSize: 13, color: taLatest == null ? "#9a9890" : inBox ? "#2c7a4b" : "#b23b39" } }, statusText) : null;
+
+  const boxCard = /*#__PURE__*/React.createElement("div", { style: S.insight },
+    /*#__PURE__*/React.createElement("div", { style: S.insightK }, "Alkalinity box for these conditions"),
+    /*#__PURE__*/React.createElement("div", { style: S.insightV }, boxText, aimLine, statusLine)
+  );
+
+  const chText = chNeeded == null
+    ? "Can't solve for this combination."
+    : chGapOk
+      ? "Current CH (" + fmt(CH, 0) + ") already centers CSI at the target TA \u2014 no change needed."
+      : "To center CSI at the target TA, CH would need to be about " + fmt(chNeeded, 0) + " ppm (currently " + fmt(CH, 0) + ").";
+  const chCard = /*#__PURE__*/React.createElement("div", { style: S.insight },
+    /*#__PURE__*/React.createElement("div", { style: S.insightK }, "Calcium hardness check"),
+    /*#__PURE__*/React.createElement("div", { style: S.insightV }, chText)
+  );
+
+  const taDoseRow = taDose ? /*#__PURE__*/React.createElement("div", { style: S.recRow },
+    /*#__PURE__*/React.createElement("span", { style: S.recDose }, taDose.oz, " ", ADDITIVES[taDose.chem].unit),
+    /*#__PURE__*/React.createElement("span", { style: S.recChem }, taDose.chem),
+    /*#__PURE__*/React.createElement("span", { style: S.recReason }, taDose.note)
+  ) : null;
+  const chDoseRow = chDose ? /*#__PURE__*/React.createElement("div", { style: S.recRow },
+    chDose.chem ? /*#__PURE__*/React.createElement("span", { style: S.recDose }, chDose.oz, " ", ADDITIVES[chDose.chem].unit) : /*#__PURE__*/React.createElement("span", { style: S.recDose }, "\u2014"),
+    chDose.chem ? /*#__PURE__*/React.createElement("span", { style: S.recChem }, chDose.chem) : null,
+    /*#__PURE__*/React.createElement("span", { style: S.recReason }, chDose.note)
+  ) : null;
+  const recCard = (taDose || chDose) ? /*#__PURE__*/React.createElement("div", { style: S.recBox },
+    /*#__PURE__*/React.createElement("div", { style: S.recTitle }, "To reach the target"),
+    taDoseRow,
+    chDoseRow
+  ) : null;
+
+  const footerCard = /*#__PURE__*/React.createElement("div", { style: S.footer }, "Alkalinity box solved from your CSI formula (target range set in Settings), holding pH at your target midpoint. Chlorine loss rate shifts where in that box to sit \u2014 lower TA when loss is high (more sun/aeration, faster pH creep), higher TA when loss is low (less monitoring, more benefit from a bigger buffer). Calcium hardness doesn't change the box's width, only where it needs to sit to keep CSI centered within it.");
+
+  const readyBlock = /*#__PURE__*/React.createElement(React.Fragment, null,
+    /*#__PURE__*/React.createElement("div", { className: "two-col", style: S.insightRow }, boxCard, chCard),
+    recCard,
+    footerCard
+  );
+
+  return /*#__PURE__*/React.createElement("div", null,
+    conditionsCard,
+    ready ? readyBlock : notReadyCard
+  );
+}
 function Settings({
   config,
   setConfig,
@@ -2128,6 +2327,18 @@ const S = {
     background: "#2b2a27",
     color: "#fcfbf7",
     borderColor: "#2b2a27"
+  },
+  whatIfRow: {
+    display: "flex",
+    gap: 20,
+    flexWrap: "wrap",
+    marginTop: 8
+  },
+  whatIfField: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 4,
+    minWidth: 150
   },
   cards: {
     display: "grid",
