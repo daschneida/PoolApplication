@@ -619,6 +619,23 @@ function chForCSI(target, pH, TA, CYA, T_F) {
   }
   return (lo + hi) / 2;
 }
+// Solve for the pH that produces a target CSI, holding CH/TA/CYA/temp fixed. Used
+// to find the lowest pH that still keeps CSI at or above a floor. CSI is (very
+// nearly) monotonically increasing in pH over realistic TA/CYA combinations, so
+// bisection over the normal pool pH range is safe. Returns null if the target
+// isn't reachable anywhere in [6.0, 9.0] — the caller checks the boundaries
+// directly to explain why (already safe throughout, or never safe at this TA/CH).
+function phForCSI(target, CH, TA, CYA, T_F) {
+  if ([target, CH, TA, CYA, T_F].some(v => v == null || isNaN(v))) return null;
+  let lo = 6.0, hi = 9.0;
+  const g = ph => { const v = csi(ph, CH, TA, CYA, T_F); return v == null ? -99 : v; };
+  if (g(lo) - target > 0 || g(hi) - target < 0) return null;
+  for (let i = 0; i < 40; i++) {
+    const mid = (lo + hi) / 2;
+    if (g(mid) - target > 0) hi = mid; else lo = mid;
+  }
+  return (lo + hi) / 2;
+}
 function decayFC(fc, frac) {
   if (fc == null) return null;
   const f = Math.max(0, Math.min(0.95, frac || 0));
@@ -1957,15 +1974,15 @@ function Advisor({
   })();
   const defaultTemp = tempFromLog != null ? tempFromLog : config.temp;
   const [tempOverride, setTempOverride] = useState("");
-  const [chOverride, setChOverride] = useState("");
   const T_F = tempOverride !== "" && !isNaN(tempOverride) ? Number(tempOverride) : defaultTemp;
-  const CH = chOverride !== "" && !isNaN(chOverride) ? Number(chOverride) : chLatest;
+  // Calcium hardness is treated as a fixed, static input here — no what-if override,
+  // no dosing advice. It's read straight from the latest log entry.
+  const CH = chLatest;
   const CYA = cyaLatest;
   const numOr = (v, d) => v === "" || v == null || isNaN(v) ? d : Number(v);
   const phMid = (numOr(config.phLo, 7.4) + numOr(config.phHi, 7.8)) / 2;
   const csiLo = numOr(config.csiLo, -0.3);
   const csiHi = numOr(config.csiHi, 0.3);
-  const csiMid = (csiLo + csiHi) / 2;
   const ready = [CH, CYA, T_F].every(v => v != null && !isNaN(v));
 
   const taLo = ready ? taForCSI(csiLo, phMid, CH, CYA, T_F) : null;
@@ -1975,9 +1992,6 @@ function Advisor({
   const seasonalT = Math.max(0, Math.min(1, frac / 0.5));
   const taTarget = taLo != null && taHi != null ? taHi - seasonalT * (taHi - taLo) : null;
   const seasonLabel = frac < 0.15 ? "low \u2014 winter-like" : frac < 0.3 ? "moderate" : "high \u2014 summer-like";
-
-  const chNeeded = ready && taTarget != null ? chForCSI(csiMid, phMid, taTarget, CYA, T_F) : null;
-  const chGapOk = chNeeded == null || CH == null ? true : Math.abs(chNeeded - CH) < 15;
   const inBox = taLatest != null && taLo != null && taHi != null && taLatest >= taLo && taLatest <= taHi;
 
   const taDose = (() => {
@@ -2004,20 +2018,21 @@ function Advisor({
     };
   })();
 
-  const chDose = (() => {
-    if (chGapOk || chNeeded == null || CH == null) return null;
-    const delta = chNeeded - CH;
-    if (delta <= 0) {
-      return { note: "current calcium hardness is already above what's needed here \u2014 no product lowers CH short of diluting the water, so leave it as is." };
-    }
-    const add = ADDITIVES["Calcium Chloride"];
-    const oz = Math.round(delta * config.volume / add.CH);
-    return {
-      chem: "Calcium Chloride",
-      oz,
-      note: "brings CH to about " + fmt(chNeeded, 0) + " ppm, centering CSI at the target TA"
-    };
-  })();
+  // Lowest pH that still keeps CSI at or above your configured floor (csiLo), holding
+  // CH/CYA/temp fixed — computed both at your current logged TA and at the box's
+  // seasonally-adjusted target TA, since the floor moves if you act on that TA advice.
+  const phFloorAt = TA => {
+    if (!ready || TA == null) return null;
+    const v = phForCSI(csiLo, CH, TA, CYA, T_F);
+    if (v != null) return { value: v, reason: null };
+    const atLowBound = csi(6.0, CH, TA, CYA, T_F);
+    const atHighBound = csi(9.0, CH, TA, CYA, T_F);
+    if (atLowBound != null && atLowBound >= csiLo) return { value: null, reason: "below" };
+    if (atHighBound != null && atHighBound < csiLo) return { value: null, reason: "never" };
+    return { value: null, reason: null };
+  };
+  const floorCurrent = phFloorAt(taLatest);
+  const floorTarget = phFloorAt(taTarget);
 
   const conditionsCard = /*#__PURE__*/React.createElement("div", { style: S.insight },
     /*#__PURE__*/React.createElement("div", { style: S.insightK }, "Current conditions"),
@@ -2033,14 +2048,8 @@ function Advisor({
         })
       ),
       /*#__PURE__*/React.createElement("div", { style: S.whatIfField },
-        /*#__PURE__*/React.createElement("label", { style: S.targetLabel }, "Calcium hardness (ppm)"),
-        /*#__PURE__*/React.createElement("input", {
-          type: "number",
-          style: S.inputSm,
-          placeholder: fmt(chLatest, 0),
-          value: chOverride,
-          onChange: e => setChOverride(e.target.value)
-        })
+        /*#__PURE__*/React.createElement("span", { style: S.targetLabel }, "Calcium hardness (ppm)"),
+        /*#__PURE__*/React.createElement("div", { style: { fontSize: 15, marginTop: 4 } }, fmt(chLatest, 0), /*#__PURE__*/React.createElement("span", { style: { color: "#9a9890", fontStyle: "italic", marginLeft: 6, fontSize: 12 } }, "static \u2014 from your log"))
       ),
       /*#__PURE__*/React.createElement("div", { style: S.whatIfField },
         /*#__PURE__*/React.createElement("span", { style: S.targetLabel }, "Chlorine loss rate"),
@@ -2050,7 +2059,7 @@ function Advisor({
         )
       )
     ),
-    /*#__PURE__*/React.createElement("div", { style: { fontSize: 12, color: "#9a9890", fontStyle: "italic", marginTop: 8 } }, "Leave temp or CH blank to use your latest log entry. Override either to test a what-if.")
+    /*#__PURE__*/React.createElement("div", { style: { fontSize: 12, color: "#9a9890", fontStyle: "italic", marginTop: 8 } }, "Leave temp blank to use your latest log entry. Override it to test a what-if. Calcium hardness is read directly from your log.")
   );
 
   const notReadyCard = /*#__PURE__*/React.createElement("div", { style: S.reminderGentle }, "Need CH, CYA and a temperature reading to compute a target \u2014 log a full measurement first.");
@@ -2067,14 +2076,36 @@ function Advisor({
     /*#__PURE__*/React.createElement("div", { style: S.insightV }, boxText, aimLine, statusLine)
   );
 
-  const chText = chNeeded == null
-    ? "Can't solve for this combination."
-    : chGapOk
-      ? "Current CH (" + fmt(CH, 0) + ") already centers CSI at the target TA \u2014 no change needed."
-      : "To center CSI at the target TA, CH would need to be about " + fmt(chNeeded, 0) + " ppm (currently " + fmt(CH, 0) + ").";
-  const chCard = /*#__PURE__*/React.createElement("div", { style: S.insight },
-    /*#__PURE__*/React.createElement("div", { style: S.insightK }, "Calcium hardness check"),
-    /*#__PURE__*/React.createElement("div", { style: S.insightV }, chText)
+  const floorLine = (label, floor, taVal) => {
+    if (taVal == null) return null;
+    let text;
+    if (floor && floor.value != null) {
+      text = "At " + label + " TA (" + fmt(taVal, 0) + " ppm): floor \u2248 " + fmt(floor.value, 2);
+    } else if (floor && floor.reason === "below") {
+      text = "At " + label + " TA (" + fmt(taVal, 0) + " ppm): pH isn't the limit \u2014 CSI stays above your floor even down to pH 6.0";
+    } else if (floor && floor.reason === "never") {
+      text = "At " + label + " TA (" + fmt(taVal, 0) + " ppm): even pH 9.0 can't reach your CSI floor \u2014 TA/CH need to come up regardless of pH";
+    } else {
+      text = "At " + label + " TA (" + fmt(taVal, 0) + " ppm): couldn't solve for a floor.";
+    }
+    return /*#__PURE__*/React.createElement("div", { style: { marginTop: 6 } }, text);
+  };
+  const marginLine = (() => {
+    if (!floorCurrent || floorCurrent.value == null || phLatest == null) return null;
+    const margin = phLatest - floorCurrent.value;
+    const color = margin < 0 ? "#b23b39" : margin < 0.15 ? "#c07a18" : "#2c7a4b";
+    const text = margin < 0
+      ? "You're currently at pH " + fmt(phLatest, 2) + " \u2014 already " + fmt(Math.abs(margin), 2) + " below that floor."
+      : "You're currently at pH " + fmt(phLatest, 2) + " \u2014 about " + fmt(margin, 2) + " above that floor.";
+    return /*#__PURE__*/React.createElement("div", { style: { marginTop: 6, fontSize: 13, color } }, text);
+  })();
+  const phCard = /*#__PURE__*/React.createElement("div", { style: S.insight },
+    /*#__PURE__*/React.createElement("div", { style: S.insightK }, "Lowest safe pH"),
+    /*#__PURE__*/React.createElement("div", { style: S.insightV },
+      floorLine("current", floorCurrent, taLatest),
+      marginLine,
+      floorLine("target", floorTarget, taTarget)
+    )
   );
 
   const taDoseRow = taDose ? /*#__PURE__*/React.createElement("div", { style: S.recRow },
@@ -2082,21 +2113,15 @@ function Advisor({
     /*#__PURE__*/React.createElement("span", { style: S.recChem }, taDose.chem),
     /*#__PURE__*/React.createElement("span", { style: S.recReason }, taDose.note)
   ) : null;
-  const chDoseRow = chDose ? /*#__PURE__*/React.createElement("div", { style: S.recRow },
-    chDose.chem ? /*#__PURE__*/React.createElement("span", { style: S.recDose }, chDose.oz, " ", ADDITIVES[chDose.chem].unit) : /*#__PURE__*/React.createElement("span", { style: S.recDose }, "\u2014"),
-    chDose.chem ? /*#__PURE__*/React.createElement("span", { style: S.recChem }, chDose.chem) : null,
-    /*#__PURE__*/React.createElement("span", { style: S.recReason }, chDose.note)
-  ) : null;
-  const recCard = (taDose || chDose) ? /*#__PURE__*/React.createElement("div", { style: S.recBox },
+  const recCard = taDose ? /*#__PURE__*/React.createElement("div", { style: S.recBox },
     /*#__PURE__*/React.createElement("div", { style: S.recTitle }, "To reach the target"),
-    taDoseRow,
-    chDoseRow
+    taDoseRow
   ) : null;
 
-  const footerCard = /*#__PURE__*/React.createElement("div", { style: S.footer }, "Alkalinity box solved from your CSI formula (target range set in Settings), holding pH at your target midpoint. Chlorine loss rate shifts where in that box to sit \u2014 lower TA when loss is high (more sun/aeration, faster pH creep), higher TA when loss is low (less monitoring, more benefit from a bigger buffer). Calcium hardness doesn't change the box's width, only where it needs to sit to keep CSI centered within it.");
+  const footerCard = /*#__PURE__*/React.createElement("div", { style: S.footer }, "Alkalinity box and pH floor both solved from your CSI formula (target range set in Settings), holding CH fixed at your logged value and pH at your target midpoint for the box. Chlorine loss rate shifts where in the box to sit \u2014 lower TA when loss is high (more sun/aeration, faster pH creep), higher TA when loss is low (less monitoring, more benefit from a bigger buffer). The pH floor is the lowest pH that keeps CSI at or above your configured minimum at a given TA \u2014 useful if you're running pH low for chlorine efficacy and want to know your margin.");
 
   const readyBlock = /*#__PURE__*/React.createElement(React.Fragment, null,
-    /*#__PURE__*/React.createElement("div", { className: "two-col", style: S.insightRow }, boxCard, chCard),
+    /*#__PURE__*/React.createElement("div", { className: "two-col", style: S.insightRow }, boxCard, phCard),
     recCard,
     footerCard
   );
