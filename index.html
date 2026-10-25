@@ -1627,7 +1627,10 @@ function App() {
           break;
         }
       }
-      if (crossing) out.cl = { chem: CL_CHEM, step: jug, defaultOz: jug, perOz: ADDITIVES[CL_CHEM].Cl / V, crossing };
+      // Dose rule: the fewest pours that put FC at or just over the top of the target range.
+      const perPour = ADDITIVES[CL_CHEM].Cl * jug / V;
+      const pours = Math.max(1, Math.ceil((out.fcHi - latest.fc) / perPour - 1e-9));
+      if (crossing) out.cl = { chem: CL_CHEM, step: jug, defaultOz: pours * jug, pours, perOz: ADDITIVES[CL_CHEM].Cl / V, crossing };
     }
     if (latest.ph != null && latest.ph > out.phHi) {
       const a = ADDITIVES[ACID_CHEM];
@@ -1655,9 +1658,17 @@ function App() {
     const P = { V, now: Date.now(), days, frac: effFrac, k: effPhK, phEq: effPhEq, phEqOverride, sunStart: config.sunStart, sunEnd: config.sunEnd };
     const cl = [{ chem: null, oz: 0 }];
     if (latest.fc != null) {
-      for (let j = 1; j <= 3; j++) cl.push({ chem: CL_CHEM, oz: j * jug });
-      if (latest.cya != null && latest.cya < R.cyaLo) CL_STEPS["Trichlor"].forEach(oz => cl.push({ chem: "Trichlor", oz }));
-      if (latest.ch != null && latest.ch < R.chLo) CL_STEPS["Ca(OCl)2 (73 wt%)"].forEach(oz => cl.push({ chem: "Ca(OCl)2 (73 wt%)", oz }));
+      // Chlorine is dosed to the top of the range, not optimized over the horizon: the one
+      // candidate per source is the smallest amount that lands FC at or just over fcHi.
+      const toTop = (chem, stepsOrNull) => {
+        const per = ADDITIVES[chem].Cl / V;
+        const need = Math.max(0, R.fcHi - latest.fc);
+        if (stepsOrNull) { const hit = stepsOrNull.find(oz => oz * per >= need - 1e-9); return hit != null ? hit : stepsOrNull[stepsOrNull.length - 1]; }
+        return Math.max(1, Math.ceil(need / (per * jug) - 1e-9)) * jug;
+      };
+      cl.push({ chem: CL_CHEM, oz: toTop(CL_CHEM, null) });
+      if (latest.cya != null && latest.cya < R.cyaLo) cl.push({ chem: "Trichlor", oz: toTop("Trichlor", CL_STEPS["Trichlor"]) });
+      if (latest.ch != null && latest.ch < R.chLo) cl.push({ chem: "Ca(OCl)2 (73 wt%)", oz: toTop("Ca(OCl)2 (73 wt%)", CL_STEPS["Ca(OCl)2 (73 wt%)"]) });
     }
     const acid = [0]; if (plan.acid) acid.push(...plan.acid.steps); // acid only while pH is above the ceiling (house rule)
     const bicarb = [0]; if (latest.ta != null && latest.ta < R.taLo && latest.ph != null) bicarb.push(16, 32, 48);
@@ -2023,9 +2034,10 @@ function Home({ config, latest, series, forecast, learned, effFrac, effPhK, effP
   const bestCl = advice ? advice.best.doses.find(d => ADDITIVES[d.chem].Cl > 0) || null : null;
   const bestAcid = advice ? advice.best.doses.find(d => d.chem === ACID_CHEM) || null : null;
   const clChem = bestCl ? bestCl.chem : CL_CHEM;
-  const [clOz, setClOz] = useState(bestCl ? bestCl.oz : jug);
+  const clSeed = bestCl ? bestCl.oz : plan.cl ? plan.cl.defaultOz : jug;
+  const [clOz, setClOz] = useState(clSeed);
   const [acidOz, setAcidOz] = useState(bestAcid ? bestAcid.oz : plan.acid ? plan.acid.defaultOz : 43);
-  useEffect(() => { setClOz(bestCl ? bestCl.oz : jug); }, [bestCl && bestCl.chem, bestCl && bestCl.oz, jug]);
+  useEffect(() => { setClOz(clSeed); }, [clSeed, bestCl && bestCl.chem]);
   useEffect(() => { setAcidOz(bestAcid ? bestAcid.oz : plan.acid ? plan.acid.defaultOz : 43); }, [bestAcid && bestAcid.oz, plan.acid && plan.acid.defaultOz]);
   const showCl = !!(plan.cl || bestCl);
   const planLine = advice ? `Planner, ${advice.days} days: ${advice.best.doses.length ? advice.best.doses.map(doseLabel).join(" + ") : "add nothing"} → ${summaryLine(advice.best.summary)}.` : null;
@@ -2106,7 +2118,7 @@ function Home({ config, latest, series, forecast, learned, effFrac, effPhK, effP
         lines: [`${fmt(latest.fc)} → ${fmt(clEff.fc)} ppm now; about ${fmt(clEff.fc1)} ppm this time tomorrow${clChem !== CL_CHEM && clEff.cya != null && latest.cya != null && clEff.cya !== latest.cya ? ` · CYA ${fmt(latest.cya, 0)} → ${fmt(clEff.cya, 0)}` : ""}${clChem !== CL_CHEM && clEff.ch != null && latest.ch != null && clEff.ch !== latest.ch ? ` · CH ${fmt(latest.ch, 0)} → ${fmt(clEff.ch, 0)}` : ""}.`,
           plan.cl ? (plan.cl.crossing.days > 0 ? `Without it FC crosses ${fcR.lo} ppm ${daysPhrase(plan.cl.crossing)}.` : `FC is already below ${fcR.lo} ppm.`) : null,
           !bestCl ? `The planner would wait: ${summaryLine(advice.none ? advice.none.summary : advice.best.summary)} without chlorine.` : planLine].filter(Boolean),
-        note: clChem === CL_CHEM ? `Poured in ${jug} fl oz steps; overshoot is fine. Writes the dose at the current time on tap. Undo from the banner or Log.` : `${clChem} chosen because ${clChem === "Trichlor" ? "CYA" : "calcium"} is below target. Writes on tap.`,
+        note: clChem === CL_CHEM ? `Fewest ${jug} fl oz pours that reach the top of your range (${fcR.hi} ppm). Writes the dose at the current time on tap. Undo from the banner or Log.` : `${clChem} chosen because ${clChem === "Trichlor" ? "CYA" : "calcium"} is below target. Writes on tap.`,
         onLog: () => logDoseNow(clChem, clOz)
       }) : h("div", { className: "allgood" }, `No chlorine called for: FC stays above ${fcR.lo} ppm through the ${config.chartDaysFwd || 7}-day forecast.`)),
 
@@ -2431,7 +2443,7 @@ function Advisor({ measurements, latest, config, learned, effFrac, plan, advice,
       h("p", { className: "p" }, `With it: ${summaryLine(advice.best.summary)}.`),
       advice.none && advice.none !== advice.best ? h("p", { className: "p" }, `Doing nothing: ${summaryLine(advice.none.summary)}.`) : null,
       advice.alt ? h("p", { className: "p" }, `Runner-up: ${advice.alt.doses.length ? advice.alt.doses.map(doseLabel).join(" + ") : "nothing"} → ${summaryLine(advice.alt.summary)}.`) : null,
-      h("p", { className: "p" }, "Timing: chlorine after the sun window, acid with the pump running and at least 30 minutes away from any chlorine. Each plan is scored on squared distance outside your target ranges over the horizon; the 1 ppm floor, pH and CSI carry the most weight."),
+      h("p", { className: "p" }, "Timing: chlorine after the sun window, acid with the pump running and at least 30 minutes away from any chlorine. Chlorine is sized to the top of your range; everything else is scored on squared distance outside your target ranges over the horizon, with the 1 ppm floor, pH and CSI carrying the most weight."),
       advice.best.doses.length ? h("button", { type: "button", className: "btn-primary tall", onClick: () => advice.best.doses.forEach(d => logDoseNow(d.chem, d.oz)) }, advice.best.doses.length === 1 ? `Added ${doseLabel(advice.best.doses[0])}, log it` : "Added all of these, log them") : null) : null,
     h("p", { className: "p lead" }, "Where should alkalinity and pH sit so CSI stays in range at this calcium, CYA and temperature?"),
     h(Card, null,
