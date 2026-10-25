@@ -697,6 +697,17 @@ const nowLocalDT = () => {
   const x = new Date();
   return `${toLocalISO(x)}T${String(x.getHours()).padStart(2, "0")}:${String(x.getMinutes()).padStart(2, "0")}`;
 };
+// Same, to the second. Used for tap-to-log doses so entries seconds apart keep their order.
+const nowLocalDTs = () => {
+  const x = new Date();
+  return `${nowLocalDT()}:${String(x.getSeconds()).padStart(2, "0")}`;
+};
+// A form timestamp (minute resolution) becomes second-resolution on save: if it is still
+// the current minute, stamp the current seconds; otherwise append :00.
+const stampSeconds = ts => {
+  if (!ts || ts.length !== 16) return ts;
+  return ts === nowLocalDT() ? nowLocalDTs() : ts + ":00";
+};
 // Millisecond timestamp for any entry. New entries carry .ts (ISO datetime-local string,
 // interpreted as local time). Legacy entries have only .date (YYYY-MM-DD) → treat as noon local
 // so they sit neutrally within the day and don't shift relative ordering.
@@ -852,19 +863,151 @@ function sunDays(t0, t1, sunStart, sunEnd) {
 // then set where the carbonate buffer balances. Returns null if inputs are insufficient.
 // Reality caveat: real pools with aeration (waterfalls, jets) sit 0.1-0.2 higher than
 // this prediction because aeration drives CO2 below atmospheric equilibrium.
-function predictPhEq(TA, CYA, pH_current, T_F) {
-  if (TA == null || TA <= 0 || pH_current == null || T_F == null) return null;
-  // pH-dependent CYA contribution to alkalinity, subtract to get carbonate alk
-  const CarbAlk_ppm = TA - (0.38772 * (CYA || 0)) / (1 + Math.pow(10, 6.83 - pH_current));
-  if (CarbAlk_ppm <= 0) return null;
-  const CarbAlk_M = CarbAlk_ppm * 2e-5;  // ppm as CaCO3 -> mol/L bicarbonate equiv
-  const T_C = (T_F - 32) * 5 / 9;
-  const T_K = T_C + 273.15;
-  const pK1 = 6.498 - 0.0058 * T_C;       // Plummer & Busenberg linear approx
-  const KH = 0.0334 * Math.exp(2400 * (1 / T_K - 1 / 298.15));  // Henry constant, van 't Hoff
-  const CO2_M = KH * 420e-6;              // 420 ppm atmospheric CO2
-  return pK1 + Math.log10(CarbAlk_M / CO2_M);
+function predictPhEq(TA, CYA, pH_current, T_F, CH) {
+  // Open-system equilibrium pH from the carbonate module (dissolved CO2 in balance with
+  // the atmosphere at this alkalinity). pH_current is no longer needed but kept for callers.
+  if (TA == null || TA <= 0 || T_F == null) return null;
+  return phEquilibrium(TA, CYA || 0, T_F, CH || 300);
 }
+/* ===================== CARBONATE SYSTEM =====================
+   Explicit CO2 / HCO3- / CO3-- chemistry so that acid, bicarbonate, trichlor and
+   CO2 outgassing all act on one consistent state (total alkalinity + dissolved
+   inorganic carbon) instead of per-chemical linear pH coefficients.
+
+   Constants (freshwater, molal ~ molar at pool ionic strength):
+     K1, K2, KH   Plummer & Busenberg (1982), Geochim. Cosmochim. Acta 46, 1011.
+     Kw           Harned & Owen (1958) fit.
+     Cyanurate    TFP apparent pKa 6.83 and 0.38772 ppm-CaCO3 per ppm CYA, the same
+                  term csi() uses, so CSI and the pH model see the same alkalinity.
+     Activity     Davies equation on the same ionic strength estimate csi() uses:
+                  I = (1.5*CH + TA)/50045.  pH is treated as an activity.
+     pCO2         425 uatm (2026 atmosphere). Equilibrium pH is where dissolved CO2
+                  matches KH*pCO2; the user may override it in Settings.
+   Units inside: alkalinity and DIC in mol/L (eq/L); TA/CYA/CH in ppm at the API.
+   ============================================================ */
+const PCO2_ATM = 425e-6;
+const PPM_CACO3_PER_EQ = 50044;      // mg CaCO3 per eq (ppm as CaCO3 -> eq/L is /50044)
+const CYA_MW = 129070;               // mg/mol cyanuric acid
+const ALK_PPM_PER_FC_PPM = 50.044 / 70.906; // ppm CaCO3 of alkalinity consumed per ppm FC (as Cl2) when one HOCl is reduced
+function carbK(T_F, CH, TA) {
+  const T = ((T_F == null || isNaN(T_F) ? 80 : T_F) - 32) * 5 / 9 + 273.15;
+  const lgT = Math.log10(T);
+  const K1 = Math.pow(10, -356.3094 - 0.06091964 * T + 21834.37 / T + 126.8339 * lgT - 1684915 / (T * T));
+  const K2 = Math.pow(10, -107.8871 - 0.03252849 * T + 5151.79 / T + 38.92561 * lgT - 563713.9 / (T * T));
+  const KH = Math.pow(10, 108.3865 + 0.01985076 * T - 6919.53 / T - 40.45154 * lgT + 669365 / (T * T));
+  const Kw = Math.pow(10, -4470.99 / T + 6.0875 - 0.01706 * T);
+  const I = Math.max(0, (1.5 * (CH || 300) + (TA || 80)) / 50045);
+  const sI = Math.sqrt(I);
+  const A = 0.5085 + 0.00085 * (T - 298.15);
+  const lg = z => -A * z * z * (sI / (1 + sI) - 0.3 * I);
+  const g1 = Math.pow(10, lg(1)), g2 = Math.pow(10, lg(2));
+  // mixed constants: H+ as activity, other ions as concentrations
+  return { K1: K1 / g1, K2: K2 * g1 / g2, KH, Kw: Kw / g1, co2eq: KH * PCO2_ATM };
+}
+// Alkalinity (eq/L) for a given pH, DIC (mol/L) and CYA (ppm).
+function alkOf(pH, DIC, CYA, k) {
+  const H = Math.pow(10, -pH);
+  const a = k.K1 / H, b = k.K1 * k.K2 / (H * H), D = 1 + a + b;
+  const carb = DIC * (a + 2 * b) / D;
+  const cya = (CYA || 0) / CYA_MW / (1 + Math.pow(10, 6.83 - pH));
+  return carb + cya + k.Kw / H - H;
+}
+// DIC (mol/L) consistent with a measured pH and total alkalinity.
+function dicOf(pH, TA_ppm, CYA, k) {
+  const H = Math.pow(10, -pH);
+  const a = k.K1 / H, b = k.K1 * k.K2 / (H * H), D = 1 + a + b;
+  const cya = (CYA || 0) / CYA_MW / (1 + Math.pow(10, 6.83 - pH));
+  const carbAlk = TA_ppm / PPM_CACO3_PER_EQ - cya - k.Kw / H + H;
+  return Math.max(0, carbAlk * D / (a + 2 * b));
+}
+function co2Of(pH, TA_ppm, CYA, k) {
+  const H = Math.pow(10, -pH);
+  const D = 1 + k.K1 / H + k.K1 * k.K2 / (H * H);
+  return dicOf(pH, TA_ppm, CYA, k) / D;
+}
+// pH from total alkalinity and DIC (alkalinity rises monotonically with pH).
+function phOf(TA_ppm, DIC, CYA, k) {
+  const target = TA_ppm / PPM_CACO3_PER_EQ;
+  let lo = 4, hi = 11.5;
+  if (alkOf(lo, DIC, CYA, k) > target) return lo;
+  if (alkOf(hi, DIC, CYA, k) < target) return hi;
+  for (let i = 0; i < 50; i++) {
+    const mid = (lo + hi) / 2;
+    if (alkOf(mid, DIC, CYA, k) < target) lo = mid; else hi = mid;
+  }
+  return (lo + hi) / 2;
+}
+// Open-system equilibrium pH: dissolved CO2 in balance with the atmosphere at this TA.
+function phEquilibrium(TA_ppm, CYA, T_F, CH) {
+  if (TA_ppm == null || !(TA_ppm > 0)) return null;
+  const k = carbK(T_F, CH, TA_ppm);
+  let lo = 6, hi = 10.5;
+  for (let i = 0; i < 50; i++) {
+    const mid = (lo + hi) / 2;
+    if (co2Of(mid, TA_ppm, CYA, k) > k.co2eq) lo = mid; else hi = mid;
+  }
+  return (lo + hi) / 2;
+}
+// CO2 outgassing (or uptake) over `days` at rate kg (1/day): first-order approach of
+// dissolved CO2 to its equilibrium value at constant alkalinity. Returns the new pH.
+// phEqOverride, if given, sets the target CO2 to the value that pH would have at this TA.
+function outgasPH(pH, TA_ppm, CYA, days, kg, T_F, CH, phEqOverride) {
+  if (pH == null || TA_ppm == null || !(TA_ppm > 0) || !(days > 0)) return pH;
+  const k = carbK(T_F, CH, TA_ppm);
+  const target = phEqOverride != null ? co2Of(phEqOverride, TA_ppm, CYA, k) : k.co2eq;
+  const DIC = dicOf(pH, TA_ppm, CYA, k);
+  const H = Math.pow(10, -pH);
+  const D = 1 + k.K1 / H + k.K1 * k.K2 / (H * H);
+  const co2 = DIC / D;
+  const co2n = target + (co2 - target) * Math.exp(-(kg || 0) * days);
+  return phOf(TA_ppm, Math.max(0, DIC - (co2 - co2n)), CYA, k);
+}
+// Add dTA_ppm of alkalinity (negative for acid) and dDIC_ppm of inorganic carbon
+// (as ppm CaCO3-equivalents; bicarbonate adds 1 mol C per eq) and/or dCYA ppm.
+// Closed system on the timescale of pouring: DIC is conserved except for what the
+// additive itself carries. Returns { ph, ta }.
+function doseAcidBase(pH, TA_ppm, CYA, dTA_ppm, dDIC_ppm, dCYA, T_F, CH) {
+  if (pH == null || TA_ppm == null || !(TA_ppm > 0)) return { ph: pH, ta: TA_ppm == null ? null : TA_ppm + (dTA_ppm || 0) };
+  const k = carbK(T_F, CH, TA_ppm);
+  const DIC = dicOf(pH, TA_ppm, CYA, k) + (dDIC_ppm || 0) / PPM_CACO3_PER_EQ;
+  const TA_n = Math.max(1, TA_ppm + (dTA_ppm || 0));
+  return { ph: phOf(TA_n, DIC, (CYA || 0) + (dCYA || 0), k), ta: TA_n };
+}
+// Alkalinity consumed when a chlorine source's HOCl is eventually reduced, in eq of
+// alkalinity per mol of HOCl delivered: trichlor 1 (acid form), dichlor 0.5 (half
+// neutralized as the sodium salt), hypochlorites 0 (their base offsets the acid).
+const HOCL_ACID_EQ = { "Trichlor": 1, "Dichlor (56%/57% CYA)": 0.5 };
+// One place that turns a dose into state deltas. st = {fc, ph, cya, ta, ch, temp}; V gallons.
+// Returns the new state (fc/cya/ch linear from the spreadsheet coefficients; ta/ph from
+// the carbonate system when pH and TA are known, else the spreadsheet pH coefficient).
+function applyDose(st, chem, oz, V) {
+  const a = ADDITIVES[chem];
+  if (!a || !(oz > 0) || !(V > 0)) return st;
+  const dFc = a.Cl * oz / V, dCya = a.CYA * oz / V, dCh = a.CH * oz / V;
+  let dTA = a.TA * oz / V;
+  const acidEq = HOCL_ACID_EQ[chem] || 0;
+  if (acidEq) dTA -= acidEq * ALK_PPM_PER_FC_PPM * dFc;
+  const dDIC = chem === "Sodium Bicarbonate" ? dTA : 0;
+  const n = { ...st };
+  if (n.fc == null && dFc) n.fc = 0;
+  if (n.cya == null && dCya) n.cya = 0;
+  if (n.ch == null && dCh) n.ch = 0;
+  if (n.fc != null) n.fc += dFc;
+  if (n.ch != null) n.ch += dCh;
+  const cya0 = n.cya;
+  if (n.cya != null) n.cya += dCya;
+  const movesCarbonate = dTA !== 0 || dCya !== 0;
+  if (movesCarbonate && n.ph != null && n.ta != null && n.ta > 0) {
+    const r = doseAcidBase(n.ph, n.ta, cya0 || 0, dTA, dDIC, dCya, n.temp, n.ch);
+    n.ph = r.ph; n.ta = r.ta;
+  } else {
+    if (n.ta == null && dTA) n.ta = 0;
+    if (n.ta != null) n.ta += dTA;
+    if (n.ph != null) n.ph += a.pH * oz / V; // fallback: spreadsheet coefficient
+  }
+  return n;
+}
+
 const LS_KEY = "pool_chem_webapp_v1";
 
 /* ============================================================
@@ -940,7 +1083,7 @@ function App() {
     sunStart: 11,
     sunEnd: 17,
     sunRamp: 1,
-    jugOz: 64,
+    clStepOz: 64,
     acidDefaultOz: 43
   });
   const [measurements, setMeasurements] = useState([]);
@@ -1038,12 +1181,18 @@ function App() {
       .sort((a, b) => tsOf(b) - tsOf(a));
     const m = recentMs[0];
     if (m) {
-      const pred = predictPhEq(m.ta, m.cya, m.ph, m.temp || config.temp || 85);
+      const chM = measurements.filter(x => x.ch != null).sort((a, b) => tsOf(b) - tsOf(a))[0];
+      const pred = predictPhEq(m.ta, m.cya, m.ph, m.temp || config.temp || 85, chM ? chM.ch : null);
       if (pred != null && isFinite(pred)) return { value: pred, source: "predicted" };
     }
     return { value: 8.0, source: "default" };
   }, [config.phEq, config.temp, measurements]);
   const effPhEq = effPhEqInfo.value;
+  const phEqOverride = effPhEqInfo.source === "override" ? effPhEqInfo.value : null;
+  const lastTemp = useMemo(() => {
+    const withTemp = measurements.filter(m => m.temp != null && m.temp !== "").slice().sort((a, b) => tsOf(a) - tsOf(b));
+    return withTemp.length ? Number(withTemp[withTemp.length - 1].temp) : Number(config.temp) || 85;
+  }, [measurements, config.temp]);
 
   const learned = useMemo(() => {
     const win = config.lossWindow === "" || config.lossWindow == null || isNaN(config.lossWindow) ? 14 : Number(config.lossWindow);
@@ -1112,59 +1261,42 @@ function App() {
       }
     }
 
-    // ============== pH DRIFT ==============
-    // Per interval between consecutive pH readings:
-    //  1) start with ms[i-1].ph, add pH shifts from any doses in (prev, cur]
-    //  2) that gives phStart (the post-dose level the drift acted on)
-    //  3) observed end is ms[i].ph; days = elapsed hours / 24
-    //  4) solve dph/dt = k*(phEq - ph) -> phEnd = phEq - (phEq-phStart)*exp(-k*days)
-    //     => k = ln((phEq-phStart)/(phEq-phEnd)) / days
-    // Skip intervals where ph never had room to drift up (phStart>=phEq) or drift overshot.
-    const phMs = measurements.filter(m => m.ph != null).slice().sort((a, b) => tsOf(a) - tsOf(b));
-    let kSamples = [],
-      phIntervals = 0;
+    // ============== pH DRIFT (CO2 outgassing rate) ==============
+    // Per interval between consecutive pH readings: start from the earlier pH, push the
+    // alkalinity/CYA changes of any doses in (prev, cur] through the carbonate system,
+    // then solve for the outgassing rate kg (1/day) that carries dissolved CO2 from that
+    // start to the observed end pH over the elapsed days, at constant alkalinity.
+    const msSorted = measurements.slice().sort((a, b) => tsOf(a) - tsOf(b));
+    const phMs = msSorted.filter(m => m.ph != null);
+    let kSamples = [], phIntervals = 0;
+    const lastKnown = (key, t) => { let v = null; for (const m of msSorted) { if (tsOf(m) > t) break; if (m[key] != null && m[key] !== "") v = Number(m[key]); } return v; };
     for (let i = 1; i < phMs.length; i++) {
-      const tPrev = tsOf(phMs[i - 1]),
-        tCur = tsOf(phMs[i]);
+      const tPrev = tsOf(phMs[i - 1]), tCur = tsOf(phMs[i]);
       const hours = (tCur - tPrev) / HOUR;
       if (!(hours > 0) || hours > 21 * 24) continue;
       if (tCur < cutoff) continue; // interval ends before the window
-      const intervalDoses = doses.filter(d => {
-        const t = tsOf(d);
-        return t > tPrev && t <= tCur;
-      });
-      // Linear pH contribution from all additives (bicarb has coefficient 0 now)
-      const dPhLinear = intervalDoses.reduce((s, d) => s + (ADDITIVES[d.chem]?.pH || 0) * d.oz / config.volume, 0);
-      // Buffer pH contribution from sodium bicarbonate: use phMs[i-1].ta if available, else skip
-      const bicarb_dTA = intervalDoses.filter(d => d.chem === "Sodium Bicarbonate").reduce((s, d) => s + ADDITIVES[d.chem].TA * d.oz / config.volume, 0);
-      const taPrev = phMs[i - 1].ta; // only defined if that measurement included TA
-      const dPhBicarb = bicarb_dTA > 0 && taPrev > 0 ? bicarPHShift(bicarb_dTA, taPrev) : 0;
-      const dPh = dPhLinear + dPhBicarb;
-      const phStart = phMs[i - 1].ph + dPh; // pH after additive shifts but before drift
-      const phEnd = phMs[i].ph;
-      const days = hours / 24;
-      // valid samples: both below equilibrium, end >= start (genuine drift up)
-      if (phStart < phEq && phEnd < phEq && phEnd >= phStart) {
-        const num = phEq - phStart,
-          den = phEq - phEnd;
-        if (num > 0 && den > 0 && days > 0) {
-          const k = Math.log(num / den) / days;
-          if (isFinite(k) && k >= 0) {
-            kSamples.push(k);
-            phIntervals++;
-          }
-        }
-      } else if (phEnd >= phEq && phStart < phEq) {
-        // saturated above equilibrium during the interval — k must be at least fast enough to reach it
-        // contribute a generous floor sample so it doesn't pull k toward zero
-        const k = Math.log((phEq - phStart) / 0.01) / days; // treat as nearly reaching phEq
-        if (isFinite(k) && k >= 0 && k < 5) {
-          kSamples.push(k);
-          phIntervals++;
-        }
-      }
+      const ta0 = phMs[i - 1].ta != null ? Number(phMs[i - 1].ta) : lastKnown("ta", tPrev);
+      const cya0 = phMs[i - 1].cya != null ? Number(phMs[i - 1].cya) : lastKnown("cya", tPrev);
+      const ch0 = phMs[i - 1].ch != null ? Number(phMs[i - 1].ch) : lastKnown("ch", tPrev);
+      const t0 = phMs[i - 1].temp != null ? Number(phMs[i - 1].temp) : (lastKnown("temp", tPrev) ?? (Number(config.temp) || 85));
+      let st = { fc: null, ph: Number(phMs[i - 1].ph), cya: cya0, ta: ta0, ch: ch0, temp: t0 };
+      doses.filter(d => { const t = tsOf(d); return t > tPrev && t <= tCur; }).sort((a, b) => tsOf(a) - tsOf(b)).forEach(d => { st = applyDose(st, d.chem, d.oz, config.volume); });
+      if (st.ta == null || !(st.ta > 0)) continue; // carbonate model needs an alkalinity reading
+      const phStart = st.ph, phEnd = Number(phMs[i].ph), days = hours / 24;
+      const eq = phEqOverride != null ? phEqOverride : phEquilibrium(st.ta, st.cya || 0, st.temp, st.ch);
+      if (eq == null) continue;
+      const dS = eq - phStart, dE = eq - phEnd;
+      // usable only when start and end sit on the same side of equilibrium and the end is closer
+      if (!(dS * dE > 0) || Math.abs(dE) > Math.abs(dS) || Math.abs(dS) < 0.03) continue;
+      const sgn = dS > 0 ? 1 : -1; // below equilibrium pH rises with kg; above, it falls
+      const g = kg => sgn * (outgasPH(phStart, st.ta, st.cya || 0, days, kg, st.temp, st.ch, phEqOverride) - phEnd);
+      let lo = 0, hi = 6;
+      if (g(hi) < 0) continue; // not reproducible at any rate (e.g. a reading logged before a same-day dose); skip rather than bias k
+      for (let it = 0; it < 40; it++) { const mid = (lo + hi) / 2; if (g(mid) < 0) lo = mid; else hi = mid; }
+      const kg = (lo + hi) / 2;
+      if (isFinite(kg) && kg >= 0) { kSamples.push(kg); phIntervals++; }
     }
-    const dynPhK = kSamples.length ? Math.max(0, Math.min(1.5, kSamples.reduce((a, b) => a + b, 0) / kSamples.length)) : null;
+    const dynPhK = kSamples.length ? Math.max(0, Math.min(6, kSamples.reduce((a, b) => a + b, 0) / kSamples.length)) : null;
     if (totalLoss == null && dynPhK == null) return null;
     return {
       totalLoss,
@@ -1177,7 +1309,7 @@ function App() {
       phIntervals,
       phEq
     };
-  }, [measurements, doses, config.volume, config.lossWindow, effPhEq]);
+  }, [measurements, doses, config.volume, config.lossWindow, config.temp, effPhEq, phEqOverride]);
 
   // Forecast parameters: dynamic when available, else the Settings fallback.
   const effFrac = learned && learned.frac != null ? learned.frac : config.rSun || 0.45;
@@ -1254,7 +1386,8 @@ function App() {
       ph: null,
       cya: null,
       ta: null,
-      ch: null
+      ch: null,
+      temp: null
     };
     let lastT = null;
     const T = config.temp;
@@ -1273,8 +1406,10 @@ function App() {
           st.fc = Math.max(0, st.fc * Math.pow(1 - effFrac, sd));
         }
         if (st.ph != null) {
-          // pH drift toward equilibrium uses calendar days (24/7 outgassing process)
-          st.ph = effPhEq - (effPhEq - st.ph) * Math.exp(-effPhK * days);
+          // pH: CO2 outgassing toward atmospheric equilibrium at constant alkalinity, on
+          // calendar days (24/7 process). Falls back to a plain exponential if TA is unknown.
+          if (st.ta != null && st.ta > 0) st.ph = outgasPH(st.ph, st.ta, st.cya || 0, days, effPhK, st.temp != null ? st.temp : T, st.ch, phEqOverride);
+          else st.ph = effPhEq - (effPhEq - st.ph) * Math.exp(-effPhK * days);
         }
       }
       lastT = t;
@@ -1292,45 +1427,28 @@ function App() {
             mf[k] = true;
           }
         });
+        if (m.temp != null && m.temp !== "") st.temp = Number(m.temp);
         // Skip emitting a point if this measurement has none of the tracked params
         if (!Object.keys(mf).length) return;
       } else if (ev.kind === "dose") {
         const d = ev.data;
         const a = ADDITIVES[d.chem];
         if (!a) return;
-        const dz = {
-          fc: a.Cl * d.oz / config.volume,
-          cya: a.CYA * d.oz / config.volume,
-          ta: a.TA * d.oz / config.volume,
-          ph: a.pH * d.oz / config.volume,
-          ch: a.CH * d.oz / config.volume
-        };
-        if (st.fc == null && dz.fc) st.fc = 0;
-        if (st.ph == null && dz.ph) st.ph = 0;
-        if (st.cya == null && dz.cya) st.cya = 0;
-        if (st.ta == null && dz.ta) st.ta = 0;
-        if (st.ch == null && dz.ch) st.ch = 0;
-        if (st.fc != null) st.fc += dz.fc;
-        if (st.cya != null) st.cya += dz.cya;
-        if (st.ch != null) st.ch += dz.ch;
-        if (st.ta != null) st.ta += dz.ta;
-        // Bicarb pH uses buffer chemistry (log-based) reading post-TA-update state
-        const bicarb_dTA = d.chem === "Sodium Bicarbonate" ? dz.ta : 0;
-        const bicarb_dPH = bicarPHShift(bicarb_dTA, st.ta != null ? st.ta - bicarb_dTA : null);
-        if (st.ph != null) st.ph += dz.ph + bicarb_dPH;
-        // Which params does THIS chemical actually affect? Coefficient non-zero OR bicarb pH.
-        const phMoves = a.pH !== 0 || d.chem === "Sodium Bicarbonate" && a.TA !== 0;
+        // All dose chemistry lives in applyDose: FC/CYA/CH from the spreadsheet
+        // coefficients, TA and pH through the carbonate system.
+        const before = { ...st };
+        const after = applyDose(st, d.chem, d.oz, config.volume);
+        st.fc = after.fc; st.ph = after.ph; st.cya = after.cya; st.ta = after.ta; st.ch = after.ch;
+        const moved = k => before[k] == null ? after[k] != null : after[k] != null && Math.abs(after[k] - before[k]) > 1e-9;
         const affects = {
           fc: a.Cl !== 0,
           cya: a.CYA !== 0,
-          ta: a.TA !== 0,
+          ta: a.TA !== 0 || !!HOCL_ACID_EQ[d.chem],
           ch: a.CH !== 0,
-          ph: phMoves
+          ph: moved("ph") || a.pH !== 0 || d.chem === "Sodium Bicarbonate"
         };
-        // CSI moves whenever pH, TA, CH, or CYA moves
         affects.csi = affects.ph || affects.ta || affects.ch || affects.cya;
         hasDose = true;
-        // Stash on the event for emission below
         ev._affects = affects;
         ev._chem = d.chem;
       }
@@ -1358,7 +1476,7 @@ function App() {
       });
     });
     return out;
-  }, [measurements, doses, config, effFrac, effPhK]);
+  }, [measurements, doses, config, effFrac, effPhK, effPhEq, phEqOverride]);
 
   // "latest" = the current day's row (today), which now includes any measurement + additive
   // contributions applied for today. If today is beyond the series, fall back to the last row.
@@ -1377,7 +1495,7 @@ function App() {
     const fc = anchor.fc == null ? null : Math.max(0, anchor.fc * Math.pow(1 - effFrac, sd));
     // pH: drift toward equilibrium
     const phEq = effPhEq;
-    const ph = anchor.ph == null ? null : phEq - (phEq - anchor.ph) * Math.exp(-effPhK * days);
+    const ph = anchor.ph == null ? null : anchor.ta != null && anchor.ta > 0 ? outgasPH(anchor.ph, anchor.ta, anchor.cya || 0, days, effPhK, lastTemp, anchor.ch, phEqOverride) : phEq - (phEq - anchor.ph) * Math.exp(-effPhK * days);
     // CYA, TA, CH don't drift between events — carry forward
     const cya = anchor.cya,
       ta = anchor.ta,
@@ -1396,7 +1514,7 @@ function App() {
       _projectedFromHours: (nowHour - anchor.t) / HOUR,
       _anchorT: anchor.t
     };
-  }, [series, effFrac, effPhK, effPhEq, config.temp, config.sunStart, config.sunEnd]);
+  }, [series, effFrac, effPhK, effPhEq, phEqOverride, lastTemp, config.temp, config.sunStart, config.sunEnd]);
 
   // Chart display window: [today - chartDaysBack, today + chartDaysFwd], clamped to available data.
   const chartSeries = useMemo(() => {
@@ -1483,15 +1601,10 @@ function App() {
     URL.revokeObjectURL(url);
   }
   // ===================== DOSING PLAN (container-sized) =====================
-  // Chlorine: whole jugs of NaOCl. Suggested whenever FC is below the low bound now or the
+  // Chlorine: NaOCl in fixed pour increments (default 64 fl oz). Suggested whenever FC is below the low bound now or the
   // forecast crosses it inside the chart window. Overshoot inside/above range is accepted.
   // Acid: suggested only while pH is above the range high. Fixed container steps, hard cap.
-  const CL_CHEM = "NaOCl (10.5 wt%)";
-  const ACID_CHEM = "Muriatic acid (31%)";
-  const curTemp = useMemo(() => {
-    const withTemp = measurements.filter(m => m.temp != null && m.temp !== "").slice().sort((a, b) => tsOf(a) - tsOf(b));
-    return withTemp.length ? Number(withTemp[withTemp.length - 1].temp) : Number(config.temp) || 85;
-  }, [measurements, config.temp]);
+  const curTemp = lastTemp;
   const plan = useMemo(() => {
     const num = (v, d) => v === "" || v == null || isNaN(v) ? d : Number(v);
     const out = {
@@ -1504,7 +1617,7 @@ function App() {
     };
     if (!latest) return out;
     const V = num(config.volume, 19000);
-    const jug = Math.max(1, num(config.jugOz, 64));
+    const jug = Math.max(1, num(config.clStepOz, 64));
     if (latest.fc != null) {
       let crossing = null;
       if (latest.fc < out.fcLo) crossing = { days: 0, date: latest.date };
@@ -1521,8 +1634,8 @@ function App() {
       const def = num(config.acidDefaultOz, 43);
       out.acid = {
         chem: ACID_CHEM,
-        steps: ACID_STEPS,
-        defaultOz: ACID_STEPS.includes(def) ? def : 43,
+        steps: acidStepsFor(config),
+        defaultOz: acidDefaultFor(config),
         phPerOz: a.pH / V,
         taPerOz: a.TA / V
       };
@@ -1530,7 +1643,42 @@ function App() {
     return out;
   }, [latest, series, config]);
 
-  // Write a dose now (timestamped to the minute) and offer an undo.
+  // ---------- advice: the best container-sized plan over the forecast horizon ----------
+  const advice = useMemo(() => {
+    if (!latest) return null;
+    const n = (v, d) => v === "" || v == null || isNaN(v) ? d : Number(v);
+    const R = { fcLo: plan.fcLo, fcHi: plan.fcHi, phLo: plan.phLo, phHi: plan.phHi, csiLo: n(config.csiLo, -0.3), csiHi: n(config.csiHi, 0.3),
+      cyaLo: n(config.cyaLo, 40), cyaHi: n(config.cyaHi, 60), taLo: n(config.taLo, 80), taHi: n(config.taHi, 120), chLo: n(config.chLo, 200), chHi: n(config.chHi, 400) };
+    const V = n(config.volume, 19000), jug = Math.max(1, n(config.clStepOz, 64));
+    const days = Math.max(3, Math.min(7, n(config.chartDaysFwd, 7)));
+    const st0 = { fc: latest.fc, ph: latest.ph, cya: latest.cya, ta: latest.ta, ch: latest.ch, temp: lastTemp };
+    const P = { V, now: Date.now(), days, frac: effFrac, k: effPhK, phEq: effPhEq, phEqOverride, sunStart: config.sunStart, sunEnd: config.sunEnd };
+    const cl = [{ chem: null, oz: 0 }];
+    if (latest.fc != null) {
+      for (let j = 1; j <= 3; j++) cl.push({ chem: CL_CHEM, oz: j * jug });
+      if (latest.cya != null && latest.cya < R.cyaLo) CL_STEPS["Trichlor"].forEach(oz => cl.push({ chem: "Trichlor", oz }));
+      if (latest.ch != null && latest.ch < R.chLo) CL_STEPS["Ca(OCl)2 (73 wt%)"].forEach(oz => cl.push({ chem: "Ca(OCl)2 (73 wt%)", oz }));
+    }
+    const acid = [0]; if (plan.acid) acid.push(...plan.acid.steps); // acid only while pH is above the ceiling (house rule)
+    const bicarb = [0]; if (latest.ta != null && latest.ta < R.taLo && latest.ph != null) bicarb.push(16, 32, 48);
+    const cacl = [0]; if (latest.ch != null && latest.ch < R.chLo) cacl.push(32, 64, 128);
+    const acidDefault = acidDefaultFor(config);
+    const plans = [];
+    for (const c of cl) for (const a of acid) for (const b of bicarb) for (const cc of cacl) {
+      const doses = [];
+      if (c.chem) doses.push({ chem: c.chem, oz: c.oz });
+      if (a) doses.push({ chem: ACID_CHEM, oz: a });
+      if (b) doses.push({ chem: "Sodium Bicarbonate", oz: b });
+      if (cc) doses.push({ chem: "Calcium Chloride", oz: cc });
+      const pts = simulatePlan(st0, doses, P);
+      plans.push({ doses, pts, score: scorePlan(pts, doses, R, acidDefault), summary: summarizePts(pts), key: `${c.chem}|${c.oz}|${a}` });
+    }
+    plans.sort((x, y) => x.score - y.score);
+    const best = plans[0];
+    return { best, alt: plans.find(q => q.key !== best.key) || null, none: plans.find(q => q.doses.length === 0) || null, days, count: plans.length, R };
+  }, [latest, plan, config, effFrac, effPhK, effPhEq, phEqOverride, lastTemp]);
+
+  // Write a dose now (timestamped to the second) and offer an undo.
   const [toast, setToast] = useState(null);
   useEffect(() => {
     if (!toast) return;
@@ -1538,7 +1686,7 @@ function App() {
     return () => clearTimeout(id);
   }, [toast]);
   const logDoseNow = (chem, oz) => {
-    const row = { ts: nowLocalDT(), chem, oz: Number(oz) };
+    const row = { ts: nowLocalDTs(), chem, oz: Number(oz) };
     setDoses(prev => [...prev, row]);
     setToast({
       msg: `Logged ${oz} ${ADDITIVES[chem].unit} ${chem}`,
@@ -1555,22 +1703,14 @@ function App() {
   // Effect of a hypothetical dose from the projected-now state.
   const effectOf = (chem, oz) => {
     if (!latest) return null;
-    const a = ADDITIVES[chem];
-    const V = Number(config.volume) || 19000;
-    const dFc = a.Cl * oz / V, dTa = a.TA * oz / V, dCh = a.CH * oz / V, dCya = a.CYA * oz / V;
-    const dPh = chem === "Sodium Bicarbonate" ? bicarPHShift(dTa, latest.ta) : a.pH * oz / V;
-    const fc = latest.fc == null ? null : latest.fc + dFc;
-    const ph = latest.ph == null ? null : latest.ph + dPh;
-    const ta = latest.ta == null ? null : latest.ta + dTa;
-    const ch = latest.ch == null ? null : latest.ch + dCh;
-    const cya = latest.cya == null ? null : latest.cya + dCya;
-    const csiNow = csi(ph, ch, ta, cya, curTemp);
-    // one calendar day of pH drift toward equilibrium, FC one sun-day of decay
-    const ph1 = ph == null ? null : effPhEq - (effPhEq - ph) * Math.exp(-effPhK * 1);
+    const n = applyDose({ fc: latest.fc, ph: latest.ph, cya: latest.cya, ta: latest.ta, ch: latest.ch, temp: curTemp }, chem, oz, Number(config.volume) || 19000);
+    const csiNow = csi(n.ph, n.ch, n.ta, n.cya, curTemp);
+    // one calendar day of CO2 outgassing, one sun-day of FC decay
+    const ph1 = n.ph == null ? null : n.ta != null && n.ta > 0 ? outgasPH(n.ph, n.ta, n.cya || 0, 1, effPhK, curTemp, n.ch, phEqOverride) : effPhEq - (effPhEq - n.ph) * Math.exp(-effPhK);
     const sd1 = sunDays(Date.now(), Date.now() + MS_DAY, config.sunStart, config.sunEnd);
-    const fc1 = fc == null ? null : Math.max(0, fc * Math.pow(1 - effFrac, sd1));
-    const csi1 = csi(ph1, ch, ta, cya, curTemp);
-    return { fc, ph, ta, ch, cya, csiNow, ph1, fc1, csi1 };
+    const fc1 = n.fc == null ? null : Math.max(0, n.fc * Math.pow(1 - effFrac, sd1));
+    const csi1 = csi(ph1, n.ch, n.ta, n.cya, curTemp);
+    return { fc: n.fc, ph: n.ph, ta: n.ta, ch: n.ch, cya: n.cya, csiNow, ph1, fc1, csi1 };
   };
 
   const lastMeasTs = measurements.length ? Math.max(...measurements.map(tsOf)) : null;
@@ -1585,14 +1725,14 @@ function App() {
   }, [loaded]);
   if (!loaded) return h(Splash, { out: false, name: config.name });
 
-  const shared = { config, latest, series, chartSeries, forecast, learned, effFrac, effPhK, effPhEq, effPhEqInfo, plan, effectOf, logDoseNow, curTemp, lastMeasTs, setTab, setFocus, focus };
+  const shared = { config, latest, series, chartSeries, forecast, learned, effFrac, effPhK, effPhEq, effPhEqInfo, plan, advice, effectOf, logDoseNow, curTemp, lastMeasTs, setTab, setFocus, focus };
 
   return h("div", { className: "app" },
     h(TopBar, { config, latest, syncStatus, tab }),
     tab === "home" && h(Home, shared),
     tab === "trends" && h(Trends, { ...shared, setConfig }),
     tab === "log" && h(LogTab, { ...shared, measurements, setMeasurements, doses, setDoses }),
-    tab === "advisor" && h(Advisor, { measurements, latest, config, learned, effFrac, plan, effectOf, logDoseNow, curTemp, effPhEq, effPhK }),
+    tab === "advisor" && h(Advisor, { measurements, latest, config, learned, effFrac, plan, advice, effectOf, logDoseNow, curTemp, effPhEq, effPhK }),
     tab === "settings" && h(Settings, {
       config, setConfig, learned, effPhEq, effPhEqInfo, syncStatus, exportCSV,
       latestCya: latest ? latest.cya : null,
@@ -1616,7 +1756,12 @@ const C = {
   indigo: "#6d28d9", brown: "#be185d", choc: "#334155", gold: "#f59e0b", red: "#dc2626",
   g100: "#f1f5f9", g300: "#cbd5e1", g500: "#64748b", ink: "#0f172a", white: "#ffffff"
 };
-const ACID_STEPS = [32, 43, 64];
+const CL_CHEM = "NaOCl (10.5 wt%)";
+const ACID_CHEM = "Muriatic acid (31%)";
+const ACID_BASE_STEPS = [32, 43, 64];
+// Stepper positions for acid: the base container sizes plus whatever default the user typed.
+const acidStepsFor = config => { const d = Number(config.acidDefaultOz); const arr = ACID_BASE_STEPS.slice(); if (d > 0 && !arr.includes(d)) arr.push(d); return arr.sort((a, b) => a - b); };
+const acidDefaultFor = config => { const d = Number(config.acidDefaultOz); return d > 0 ? d : 43; };
 const colorOf = key => (PARAMS.find(p => p.key === key) || {}).color || C.ink;
 const numOrDef = (v, d) => v === "" || v == null || isNaN(v) ? d : Number(v);
 const rangeOf = (config, key) => {
@@ -1639,6 +1784,62 @@ const statusOf = (v, lo, hi) => {
   return { label: "in range", bg: C.mint, fg: C.green };
 };
 const daysPhrase = c => c == null ? null : c.days <= 0 ? "now" : c.days === 1 ? "in 1 day" : `in ${c.days} days`;
+
+/* ===================== ADVICE ENGINE ===================== */
+// Enumerate container-sized dose plans, simulate each over the next few days with the same
+// FC sun-day decay and carbonate chemistry the chart uses, and score the trajectory.
+// Weights are per sample point (6-hour steps), squared distance outside each target range:
+// the FC floor (1 ppm) and pH/CSI dominate; overshooting FC costs little (user accepts it);
+// long-term parameters count a little so trichlor or cal-hypo win when CYA or CH are low.
+function simulatePlan(st0, doses, P) {
+  let st = { ...st0 };
+  doses.forEach(d => { st = applyDose(st, d.chem, d.oz, P.V); });
+  const out = [{ ...st, h: 0, csi: csi(st.ph, st.ch, st.ta, st.cya, st0.temp) }];
+  const stepH = 6;
+  let t = P.now;
+  for (let hr = stepH; hr <= P.days * 24; hr += stepH) {
+    const t1 = t + stepH * HOUR;
+    if (st.fc != null) st.fc = Math.max(0, st.fc * Math.pow(1 - P.frac, sunDays(t, t1, P.sunStart, P.sunEnd)));
+    if (st.ph != null) st.ph = st.ta != null && st.ta > 0 ? outgasPH(st.ph, st.ta, st.cya || 0, stepH / 24, P.k, st.temp, st.ch, P.phEqOverride) : P.phEq - (P.phEq - st.ph) * Math.exp(-P.k * stepH / 24);
+    t = t1;
+    out.push({ ...st, h: hr, csi: csi(st.ph, st.ch, st.ta, st.cya, st0.temp) });
+  }
+  return out;
+}
+const sq = x => x * x;
+function scorePlan(pts, doses, R, acidDefault) {
+  let pen = 0;
+  for (const p of pts) {
+    if (p.fc != null) pen += 60 * sq(Math.max(0, 1 - p.fc)) + 8 * sq(Math.max(0, R.fcLo - p.fc)) + 0.25 * sq(Math.max(0, p.fc - R.fcHi));
+    if (p.ph != null) pen += 120 * sq(Math.max(0, R.phLo - p.ph)) + 80 * sq(Math.max(0, p.ph - R.phHi));
+    if (p.csi != null) pen += 60 * sq(Math.max(0, R.csiLo - p.csi)) + 40 * sq(Math.max(0, p.csi - R.csiHi));
+    if (p.cya != null) pen += 0.004 * (sq(Math.max(0, R.cyaLo - p.cya)) + sq(Math.max(0, p.cya - R.cyaHi)));
+    if (p.ta != null) pen += 0.002 * (sq(Math.max(0, R.taLo - p.ta)) + sq(Math.max(0, p.ta - R.taHi)));
+    if (p.ch != null) pen += 0.0004 * (sq(Math.max(0, R.chLo - p.ch)) + sq(Math.max(0, p.ch - R.chHi)));
+  }
+  pen /= pts.length;
+  pen += 0.12 * doses.length; // every intervention costs a little
+  const acid = doses.find(d => d.chem === ACID_CHEM);
+  if (acid && acid.oz !== acidDefault) pen += 0.25; // prefer the user's standard acid dose unless another step is clearly better
+  return pen;
+}
+function summarizePts(pts) {
+  const vals = k => pts.map(p => p[k]).filter(v => v != null);
+  const mm = k => { const v = vals(k); return v.length ? [Math.min(...v), Math.max(...v)] : null; };
+  const fc = mm("fc"), ph = mm("ph"), cs = mm("csi");
+  const hoursUnder = pts.filter(p => p.fc != null && p.fc < 1).length * 6;
+  return { fc, ph, csi: cs, hoursUnder, end: pts[pts.length - 1] };
+}
+function summaryLine(sm) {
+  const parts = [];
+  if (sm.fc) parts.push(`FC ${fmt(sm.fc[0])}–${fmt(sm.fc[1])} ppm${sm.hoursUnder ? ` (${sm.hoursUnder} h under 1 ppm)` : ""}`);
+  if (sm.ph) parts.push(`pH ${fmt(sm.ph[0], 2)}–${fmt(sm.ph[1], 2)}`);
+  if (sm.csi) parts.push(`CSI ${fmtVal("csi", sm.csi[0])} to ${fmtVal("csi", sm.csi[1])}`);
+  return parts.join(", ");
+}
+const doseLabel = d => `${d.oz} ${ADDITIVES[d.chem].unit} ${d.chem}`;
+const doseColor = chem => chem === ACID_CHEM ? colorOf("ph") : ADDITIVES[chem].Cl ? colorOf("fc") : chem === "Sodium Bicarbonate" ? colorOf("ta") : chem === "Calcium Chloride" ? colorOf("ch") : C.ink;
+const CL_STEPS = { "Trichlor": [8, 16, 24], "Ca(OCl)2 (73 wt%)": [16, 32, 48] };
 
 /* ===================== small pieces ===================== */
 function Chip({ s }) {
@@ -1688,7 +1889,7 @@ const SPLASH_LINES = [
   "Test, dose, swim. Repeat as needed.",
   "Your water is talking. Let us listen.",
   "Nobody ever regretted checking the pH.",
-  "A jug today keeps the algae away.",
+  "A pour today keeps the algae away.",
   "Calm water, calm chemist.",
   "The best time to test was yesterday. The second best time is now.",
   "Precision beats guesswork, and you have both the test kit and the model.",
@@ -1798,11 +1999,11 @@ function DoseBox({ title, chem, oz, steps, step, onChange, lines, note, onLog, h
     dec = oz > step ? () => onChange(oz - step) : null;
     inc = () => onChange(oz + step);
   }
-  const jugs = !steps && step ? Math.round(oz / step) : null;
+  const pours = !steps && step ? Math.round(oz / step) : null;
   return h("div", { className: "dosebox" },
     h("div", null,
       h("div", { className: "dose-k" }, title),
-      h("div", { className: "dose-amt" }, jugs != null ? `${jugs} jug${jugs === 1 ? "" : "s"} · ${oz} ${unit}` : `${oz} ${unit}`),
+      h("div", { className: "dose-amt" }, pours != null && pours > 1 ? `${oz} ${unit} · ${pours} × ${step}` : `${oz} ${unit}`),
       lines.map((l, i) => h("div", { key: i, className: "dose-line" }, l))),
     h("div", { className: "dose-row" },
       h("div", { className: "stepper", role: "group", "aria-label": `Amount of ${chem}` },
@@ -1814,12 +2015,20 @@ function DoseBox({ title, chem, oz, steps, step, onChange, lines, note, onLog, h
 }
 
 /* ===================== HOME ===================== */
-function Home({ config, latest, series, forecast, learned, effFrac, effPhK, effPhEq, effPhEqInfo, plan, effectOf, logDoseNow, curTemp, lastMeasTs, setTab, setFocus }) {
+function Home({ config, latest, series, forecast, learned, effFrac, effPhK, effPhEq, effPhEqInfo, plan, advice, effectOf, logDoseNow, curTemp, lastMeasTs, setTab, setFocus }) {
   const fcR = rangeOf(config, "fc"), phR = rangeOf(config, "ph"), csiR = rangeOf(config, "csi");
-  const [clOz, setClOz] = useState(plan.cl ? plan.cl.defaultOz : 64);
-  const [acidOz, setAcidOz] = useState(plan.acid ? plan.acid.defaultOz : 43);
-  useEffect(() => { if (plan.cl) setClOz(plan.cl.defaultOz); }, [plan.cl && plan.cl.defaultOz]);
-  useEffect(() => { if (plan.acid) setAcidOz(plan.acid.defaultOz); }, [plan.acid && plan.acid.defaultOz]);
+  // The planner's picks seed the steppers; the crossing rule and the pH ceiling decide
+  // whether a box is shown at all, so a box can appear with the planner advising to wait.
+  const jug = Math.max(1, numOrDef(config.clStepOz, 64));
+  const bestCl = advice ? advice.best.doses.find(d => ADDITIVES[d.chem].Cl > 0) || null : null;
+  const bestAcid = advice ? advice.best.doses.find(d => d.chem === ACID_CHEM) || null : null;
+  const clChem = bestCl ? bestCl.chem : CL_CHEM;
+  const [clOz, setClOz] = useState(bestCl ? bestCl.oz : jug);
+  const [acidOz, setAcidOz] = useState(bestAcid ? bestAcid.oz : plan.acid ? plan.acid.defaultOz : 43);
+  useEffect(() => { setClOz(bestCl ? bestCl.oz : jug); }, [bestCl && bestCl.chem, bestCl && bestCl.oz, jug]);
+  useEffect(() => { setAcidOz(bestAcid ? bestAcid.oz : plan.acid ? plan.acid.defaultOz : 43); }, [bestAcid && bestAcid.oz, plan.acid && plan.acid.defaultOz]);
+  const showCl = !!(plan.cl || bestCl);
+  const planLine = advice ? `Planner, ${advice.days} days: ${advice.best.doses.length ? advice.best.doses.map(doseLabel).join(" + ") : "add nothing"} → ${summaryLine(advice.best.summary)}.` : null;
 
   if (!latest) return h("div", { className: "page" },
     h(Card, null, h(CardHead, { title: "No readings yet" }), h("p", { className: "p" }, "Log a measurement to start the model."),
@@ -1866,8 +2075,9 @@ function Home({ config, latest, series, forecast, learned, effFrac, effPhK, effP
   // pH floor for the subtitle
   const phFloor = latest.ta != null && latest.ch != null && latest.cya != null ? phForCSI(csiR.lo, latest.ch, latest.ta, latest.cya, curTemp) : null;
 
-  const clEff = plan.cl ? effectOf(plan.cl.chem, clOz) : null;
+  const clEff = showCl ? effectOf(clChem, clOz) : null;
   const acEff = plan.acid ? effectOf(plan.acid.chem, acidOz) : null;
+  const defAcidEff = plan.acid && bestAcid && bestAcid.oz !== plan.acid.defaultOz ? effectOf(plan.acid.chem, plan.acid.defaultOz) : null;
 
   // CSI
   const csiWord = c => c == null ? "need all five inputs" : c <= -0.6 ? "corrosive" : c <= -0.3 ? "slightly corrosive" : c < 0.3 ? "balanced" : c < 0.6 ? "slightly scaling" : "scaling";
@@ -1891,12 +2101,13 @@ function Home({ config, latest, series, forecast, learned, effFrac, effPhK, effP
           h("span", null, fcBelow ? h(React.Fragment, null, h("b", null, `Below 1 ppm ${daysPhrase(fcBelow)}`), fcBelow.days > 0 ? ` (${fcBelow.date})` : "") : h("b", null, "Stays above 1 ppm through the forecast")),
           h("span", null, loss, halfLife ? ` · t½ ≈ ${halfLife} h` : ""))),
       h(MiniChart, { series, pkey: "fc", color: colorOf("fc"), lo: fcR.lo, hi: fcR.hi, threshold: 1 }),
-      plan.cl && clEff ? h(DoseBox, {
-        title: `Add today · ${plan.cl.chem}`, chem: plan.cl.chem, oz: clOz, step: plan.cl.step, onChange: setClOz,
-        lines: [`${fmt(latest.fc)} → ${fmt(clEff.fc)} ppm now; about ${fmt(clEff.fc1)} ppm this time tomorrow.`,
-          plan.cl.crossing.days > 0 ? `Without it FC crosses ${fcR.lo} ppm ${daysPhrase(plan.cl.crossing)}.` : `FC is already below ${fcR.lo} ppm.`],
-        note: `Whole jugs only; overshoot is fine. Writes the dose at the current time on tap. Undo from the banner or Log.`,
-        onLog: () => logDoseNow(plan.cl.chem, clOz)
+      showCl && clEff ? h(DoseBox, {
+        title: `Add today · ${clChem}`, chem: clChem, oz: clOz, step: clChem === CL_CHEM ? jug : undefined, steps: CL_STEPS[clChem], onChange: setClOz,
+        lines: [`${fmt(latest.fc)} → ${fmt(clEff.fc)} ppm now; about ${fmt(clEff.fc1)} ppm this time tomorrow${clChem !== CL_CHEM && clEff.cya != null && latest.cya != null && clEff.cya !== latest.cya ? ` · CYA ${fmt(latest.cya, 0)} → ${fmt(clEff.cya, 0)}` : ""}${clChem !== CL_CHEM && clEff.ch != null && latest.ch != null && clEff.ch !== latest.ch ? ` · CH ${fmt(latest.ch, 0)} → ${fmt(clEff.ch, 0)}` : ""}.`,
+          plan.cl ? (plan.cl.crossing.days > 0 ? `Without it FC crosses ${fcR.lo} ppm ${daysPhrase(plan.cl.crossing)}.` : `FC is already below ${fcR.lo} ppm.`) : null,
+          !bestCl ? `The planner would wait: ${summaryLine(advice.none ? advice.none.summary : advice.best.summary)} without chlorine.` : planLine].filter(Boolean),
+        note: clChem === CL_CHEM ? `Poured in ${jug} fl oz steps; overshoot is fine. Writes the dose at the current time on tap. Undo from the banner or Log.` : `${clChem} chosen because ${clChem === "Trichlor" ? "CYA" : "calcium"} is below target. Writes on tap.`,
+        onLog: () => logDoseNow(clChem, clOz)
       }) : h("div", { className: "allgood" }, `No chlorine called for: FC stays above ${fcR.lo} ppm through the ${config.chartDaysFwd || 7}-day forecast.`)),
 
     // 2. pH
@@ -1906,14 +2117,16 @@ function Home({ config, latest, series, forecast, learned, effFrac, effPhK, effP
         h("div", { className: "hero-val" }, h("span", { style: { color: colorOf("ph") } }, fmtVal("ph", latest.ph))),
         h("div", { className: "hero-side" },
           h("span", null, phAbove ? h(React.Fragment, null, h("b", null, `Above ${forecast.phLimit} ${daysPhrase(phAbove)}`), phAbove.days > 0 ? ` (${phAbove.date})` : "") : h("b", null, `Stays at or below ${forecast ? forecast.phLimit : 7.9}`)),
-          h("span", null, `drifting toward ${fmt(effPhEq, 2)} · k = ${fmt(effPhK, 2)}/day`))),
+          h("span", null, `outgassing toward pH ${fmt(effPhEq, 2)} · k = ${fmt(effPhK, 2)}/day`))),
       h(MiniChart, { series, pkey: "ph", color: colorOf("ph"), lo: phR.lo, hi: phR.hi, threshold: forecast ? forecast.phLimit : 7.9 }),
       plan.acid && acEff ? h(DoseBox, {
         title: `Add today · ${plan.acid.chem}`, chem: plan.acid.chem, oz: acidOz, steps: plan.acid.steps, onChange: setAcidOz,
         lines: [`pH ${fmt(latest.ph, 2)} → ${fmt(acEff.ph, 2)}${acEff.ta != null ? ` · TA ${fmt(latest.ta, 0)} → ${fmt(acEff.ta, 0)}` : ""}${acEff.csiNow != null ? ` · CSI ${fmtVal("csi", latest.csi)} → ${fmtVal("csi", acEff.csiNow)}` : ""} at dosing.`,
           `Then drift brings pH to ${fmt(acEff.ph1, 2)} by this time tomorrow${acEff.csi1 != null ? ` (CSI ${fmtVal("csi", acEff.csi1)})` : ""}.`,
-          phFloor != null && acEff.ph != null && acEff.ph < phFloor ? `Lands ${fmt(phFloor - acEff.ph, 2)} under the CSI floor briefly.` : null].filter(Boolean),
-        note: `Shown only while pH is above ${phR.hi}. Steps ${ACID_STEPS.join(" · ")} fl oz; ${ACID_STEPS[ACID_STEPS.length - 1]} is the cap per dose. Writes on tap.`,
+          phFloor != null && acEff.ph != null && acEff.ph < phFloor ? `Lands ${fmt(phFloor - acEff.ph, 2)} under the CSI floor briefly.` : null,
+          !bestAcid && advice ? `The planner would wait: ${summaryLine(advice.none ? advice.none.summary : advice.best.summary)} without acid.` : null,
+          bestAcid && bestAcid.oz !== plan.acid.defaultOz && defAcidEff ? `Planner picks ${bestAcid.oz} over your usual ${plan.acid.defaultOz}: at ${plan.acid.defaultOz} fl oz pH would sit at ${fmt(defAcidEff.ph, 2)} now and ${fmt(defAcidEff.ph1, 2)} tomorrow (CSI ${fmtVal("csi", defAcidEff.csi1)}). Step up if you prefer.` : null].filter(Boolean),
+        note: `Shown only while pH is above ${phR.hi}. Steps ${plan.acid.steps.join(" · ")} fl oz; ${plan.acid.steps[plan.acid.steps.length - 1]} is the cap per dose. Writes on tap.`,
         onLog: () => logDoseNow(plan.acid.chem, acidOz)
       }) : h("div", { className: "allgood" }, latest.ph == null ? "No pH reading yet." : `No acid called for while pH is at or below ${phR.hi}.`)),
 
@@ -1944,7 +2157,7 @@ function Home({ config, latest, series, forecast, learned, effFrac, effPhK, effP
       }))),
 
     h("div", { className: "foot" },
-      `FC decay ${learned && learned.frac != null ? `${fmt(learned.frac * 100, 0)}%/day learned from your last ${learned.win} days` : `fallback ${fmt(effFrac * 100, 0)}%/day (need 2+ recent FC readings)`}. pH drift ${learned && learned.phK != null ? `k=${fmt(learned.phK, 2)}/day learned` : `fallback k=${fmt(effPhK, 2)}/day`} toward ${fmt(effPhEq, 2)} (${effPhEqInfo.source}). CSI uses the TroubleFreePool formula with the pH-dependent CYA correction.`));
+      `FC decay ${learned && learned.frac != null ? `${fmt(learned.frac * 100, 0)}%/day learned from your last ${learned.win} days` : `fallback ${fmt(effFrac * 100, 0)}%/day (need 2+ recent FC readings)`}. pH follows the carbonate system: acid, bicarb and trichlor act on alkalinity and dissolved CO₂, and CO₂ outgasses at ${learned && learned.phK != null ? `k=${fmt(learned.phK, 2)}/day (learned)` : `the fallback k=${fmt(effPhK, 2)}/day`} toward an equilibrium of pH ${fmt(effPhEq, 2)} (${effPhEqInfo.source}). CSI uses the TroubleFreePool formula with the pH-dependent CYA correction.`));
 }
 
 /* ===================== TRENDS ===================== */
@@ -1969,7 +2182,7 @@ function Trends({ config, setConfig, chartSeries, series, focus, setFocus, lates
     const isDyn = focus === "fc" && learned && learned.frac != null || focus === "ph" && learned && learned.phK != null;
     let f = "";
     if (focus === "fc") f = ` · decay ${fmt(effFrac * 100, 0)}%/day ${isDyn ? "(dynamic, from your readings)" : "(fallback; needs 2+ recent FC readings)"}`;
-    if (focus === "ph") f = ` · drift k=${fmt(effPhK, 2)}/day toward ${fmt(effPhEq, 2)} ${isDyn ? "(dynamic)" : "(fallback)"}`;
+    if (focus === "ph") f = ` · CO₂ outgassing k=${fmt(effPhK, 2)}/day, equilibrium pH ${fmt(effPhEq, 2)} ${isDyn ? "(dynamic)" : "(fallback)"}`;
     return `${measuredPts.length} measured point${measuredPts.length === 1 ? "" : "s"} in view · ${back} days back, ${numOrDef(config.chartDaysFwd, 7)} forward${f}`;
   })();
   return h("div", { className: "page" },
@@ -2006,7 +2219,7 @@ function Trends({ config, setConfig, chartSeries, series, focus, setFocus, lates
 }
 
 /* ===================== LOG ===================== */
-function LogTab({ measurements, setMeasurements, doses, setDoses, config, latest, plan, effectOf, logDoseNow, setTab }) {
+function LogTab({ measurements, setMeasurements, doses, setDoses, config, latest, plan, effectOf, logDoseNow, setTab, curTemp }) {
   const [mode, setMode] = useState("meas");
   const [showAll, setShowAll] = useState(false);
   const [mForm, setMForm] = useState({ ts: nowLocalDT(), fc: "", ph: "", cya: "", ta: "", ch: "", temp: "" });
@@ -2014,7 +2227,7 @@ function LogTab({ measurements, setMeasurements, doses, setDoses, config, latest
   const lastWith = k => { const ms = measurements.filter(m => m[k] != null && m[k] !== "").sort((a, b) => tsOf(b) - tsOf(a)); return ms[0] || null; };
   const ago = e => { if (!e) return "no reading yet"; const d = (Date.now() - tsOf(e)) / MS_DAY; return d < 1 ? "today" : d < 2 ? "yesterday" : `${Math.floor(d)} days ago`; };
   const addMeas = () => {
-    const row = { ts: mForm.ts };
+    const row = { ts: stampSeconds(mForm.ts) };
     let any = false;
     ["fc", "ph", "cya", "ta", "ch", "temp"].forEach(k => { if (mForm[k] !== "") { row[k] = Number(mForm[k]); any = true; } });
     if (!any) return;
@@ -2024,17 +2237,21 @@ function LogTab({ measurements, setMeasurements, doses, setDoses, config, latest
   };
   const addDose = () => {
     if (dForm.oz === "") return;
-    setDoses(prev => [...prev, { ts: dForm.ts, chem: dForm.chem, oz: Number(dForm.oz) }]);
+    setDoses(prev => [...prev, { ts: stampSeconds(dForm.ts), chem: dForm.chem, oz: Number(dForm.oz) }]);
     setDForm({ ts: nowLocalDT(), chem: dForm.chem, oz: "" });
     setTab("home");
   };
   const preview = useMemo(() => {
     const a = ADDITIVES[dForm.chem]; const oz = Number(dForm.oz) || 0;
     if (!a || !oz) return null;
-    const dTA = a.TA * oz / config.volume;
-    const dPH = dForm.chem === "Sodium Bicarbonate" ? bicarPHShift(dTA, latest && latest.ta > 0 ? latest.ta : 80) : a.pH * oz / config.volume;
-    return { fc: a.Cl * oz / config.volume, cya: a.CYA * oz / config.volume, ta: dTA, ph: dPH, ch: a.CH * oz / config.volume };
-  }, [dForm, config.volume, latest]);
+    const V = Number(config.volume) || 19000;
+    if (latest && latest.ph != null && latest.ta != null && latest.ta > 0) {
+      const n = applyDose({ fc: latest.fc, ph: latest.ph, cya: latest.cya, ta: latest.ta, ch: latest.ch, temp: curTemp }, dForm.chem, oz, V);
+      return { fc: (n.fc || 0) - (latest.fc || 0), cya: (n.cya || 0) - (latest.cya || 0), ta: n.ta - latest.ta, ph: n.ph - latest.ph, ch: (n.ch || 0) - (latest.ch || 0) };
+    }
+    const dTA = a.TA * oz / V;
+    return { fc: a.Cl * oz / V, cya: a.CYA * oz / V, ta: dTA, ph: dForm.chem === "Sodium Bicarbonate" ? bicarPHShift(dTA, 80) : a.pH * oz / V, ch: a.CH * oz / V };
+  }, [dForm, config.volume, latest, curTemp]);
   const field = (id, label, k, form, setForm, extra) => h("div", { className: "field" },
     h("label", { htmlFor: id, style: extra && extra.color ? { color: extra.color, fontWeight: 700 } : undefined }, label),
     h("input", { id, type: "number", step: "any", inputMode: "decimal", value: form[k], placeholder: extra && extra.ph, onChange: e => setForm({ ...form, [k]: e.target.value }) }));
@@ -2109,7 +2326,7 @@ function LogTab({ measurements, setMeasurements, doses, setDoses, config, latest
 }
 
 /* ===================== ADVISOR ===================== */
-function Advisor({ measurements, latest, config, learned, effFrac, plan, effectOf, logDoseNow, curTemp, effPhEq, effPhK }) {
+function Advisor({ measurements, latest, config, learned, effFrac, plan, advice, effectOf, logDoseNow, curTemp, effPhEq, effPhK }) {
   const chLatest = latest ? latest.ch : null;
   const taLatest = latest ? latest.ta : null;
   const phLatest = latest ? latest.ph : null;
@@ -2147,7 +2364,7 @@ function Advisor({ measurements, latest, config, learned, effFrac, plan, effectO
     if (delta < 0) {
       const add = ADDITIVES["Muriatic acid (14%)"];
       const oz = Math.round(Math.abs(delta) * config.volume / Math.abs(add.TA));
-      const dPh = add.pH * oz / config.volume;
+      const dPh = phLatest == null ? 0 : applyDose({ fc: null, ph: phLatest, cya: CYA, ta: taLatest, ch: CH, temp: T_F }, "Muriatic acid (14%)", oz, config.volume).ph - phLatest;
       return {
         chem: "Muriatic acid (14%)",
         oz,
@@ -2156,7 +2373,7 @@ function Advisor({ measurements, latest, config, learned, effFrac, plan, effectO
     }
     const add = ADDITIVES["Sodium Bicarbonate"];
     const oz = Math.round(delta * config.volume / add.TA);
-    const dPh = taLatest > 0 ? bicarPHShift(delta, taLatest) : 0;
+    const dPh = phLatest == null || !(taLatest > 0) ? 0 : applyDose({ fc: null, ph: phLatest, cya: CYA, ta: taLatest, ch: CH, temp: T_F }, "Sodium Bicarbonate", oz, config.volume).ph - phLatest;
     return {
       chem: "Sodium Bicarbonate",
       oz,
@@ -2182,7 +2399,8 @@ function Advisor({ measurements, latest, config, learned, effFrac, plan, effectO
 
   // ---------- render ----------
   const acEff = plan.acid ? effectOf(plan.acid.chem, plan.acid.defaultOz) : null;
-  const acCap = plan.acid ? effectOf(plan.acid.chem, ACID_STEPS[ACID_STEPS.length - 1]) : null;
+  const acCapOz = plan.acid ? plan.acid.steps[plan.acid.steps.length - 1] : null;
+  const acCap = plan.acid ? effectOf(plan.acid.chem, acCapOz) : null;
   const boxPct = v => taLo == null || taHi == null || v == null ? null : Math.max(0, Math.min(100, v / Math.max(200, taHi * 1.2) * 100));
   const scaleMax = taLo == null || taHi == null ? 200 : Math.max(200, Math.ceil(taHi * 1.2 / 50) * 50);
   const pct = v => v == null ? null : Math.max(0, Math.min(100, v / scaleMax * 100));
@@ -2206,6 +2424,15 @@ function Advisor({ measurements, latest, config, learned, effFrac, plan, effectO
     return null;
   })();
   return h("div", { className: "page" },
+    advice ? h(Card, { accent: C.teal },
+      h(CardHead, { title: `Dose plan · next ${advice.days} days`, sub: `${advice.count} container-sized plans simulated with the chart model` }),
+      advice.best.doses.length ? h("div", { className: "rec" }, advice.best.doses.map((d, i) => h("div", { key: i, className: "rec-amt" }, h("b", { style: { color: doseColor(d.chem) } }, `${d.oz} ${ADDITIVES[d.chem].unit}`), h("span", null, d.chem))))
+        : h("p", { className: "p" }, h("b", null, "Best plan: add nothing today.")),
+      h("p", { className: "p" }, `With it: ${summaryLine(advice.best.summary)}.`),
+      advice.none && advice.none !== advice.best ? h("p", { className: "p" }, `Doing nothing: ${summaryLine(advice.none.summary)}.`) : null,
+      advice.alt ? h("p", { className: "p" }, `Runner-up: ${advice.alt.doses.length ? advice.alt.doses.map(doseLabel).join(" + ") : "nothing"} → ${summaryLine(advice.alt.summary)}.`) : null,
+      h("p", { className: "p" }, "Timing: chlorine after the sun window, acid with the pump running and at least 30 minutes away from any chlorine. Each plan is scored on squared distance outside your target ranges over the horizon; the 1 ppm floor, pH and CSI carry the most weight."),
+      advice.best.doses.length ? h("button", { type: "button", className: "btn-primary tall", onClick: () => advice.best.doses.forEach(d => logDoseNow(d.chem, d.oz)) }, advice.best.doses.length === 1 ? `Added ${doseLabel(advice.best.doses[0])}, log it` : "Added all of these, log them") : null) : null,
     h("p", { className: "p lead" }, "Where should alkalinity and pH sit so CSI stays in range at this calcium, CYA and temperature?"),
     h(Card, null,
       h(CardHead, { title: "Current conditions" }),
@@ -2238,7 +2465,7 @@ function Advisor({ measurements, latest, config, learned, effFrac, plan, effectO
           h(CardHead, { title: "To reach the target" }),
           plan.acid && acEff ? h("div", { className: "rec" },
             h("div", { className: "rec-amt" }, h("b", { style: { color: colorOf("ph") } }, `${plan.acid.defaultOz} fl oz`), h("span", null, plan.acid.chem)),
-            h("p", { className: "p" }, `Your standard acid dose, called for because pH ${fmt(phLatest, 2)} is above the ${fmt(numOr(config.phHi, 7.8), 1)} ceiling. Immediately: pH ${fmt(acEff.ph, 2)}, TA ${fmt(acEff.ta, 0)}, CSI ${fmtVal("csi", acEff.csiNow)}${floorCurrent && floorCurrent.value != null && acEff.ph < floorCurrent.value ? `, ${fmt(floorCurrent.value - acEff.ph, 2)} past the floor` : ""}. Drift at k=${fmt(effPhK, 2)}/day brings pH to ${fmt(acEff.ph1, 2)} by this time tomorrow (CSI ${fmtVal("csi", acEff.csi1)}).${acCap ? ` ${ACID_STEPS[ACID_STEPS.length - 1]} fl oz is the cap and would sit at ${fmt(acCap.ph, 2)} / CSI ${fmtVal("csi", acCap.csiNow)}.` : ""}`),
+            h("p", { className: "p" }, `Your standard acid dose, called for because pH ${fmt(phLatest, 2)} is above the ${fmt(numOr(config.phHi, 7.8), 1)} ceiling. Immediately: pH ${fmt(acEff.ph, 2)}, TA ${fmt(acEff.ta, 0)}, CSI ${fmtVal("csi", acEff.csiNow)}${floorCurrent && floorCurrent.value != null && acEff.ph < floorCurrent.value ? `, ${fmt(floorCurrent.value - acEff.ph, 2)} past the floor` : ""}. Drift at k=${fmt(effPhK, 2)}/day brings pH to ${fmt(acEff.ph1, 2)} by this time tomorrow (CSI ${fmtVal("csi", acEff.csi1)}).${acCap && acCapOz !== plan.acid.defaultOz ? ` ${acCapOz} fl oz is the cap and would sit at ${fmt(acCap.ph, 2)} / CSI ${fmtVal("csi", acCap.csiNow)}.` : ""}`),
             h("button", { type: "button", className: "btn-primary tall", onClick: () => logDoseNow(plan.acid.chem, plan.acid.defaultOz) }, `Added ${plan.acid.defaultOz} fl oz, log it`))
             : h("div", { className: "rec" }, h("div", { className: "rec-amt" }, h("b", null, "0 fl oz"), h("span", null, "muriatic acid")), h("p", { className: "p" }, phLatest == null ? "No pH reading yet." : `pH ${fmt(phLatest, 2)} is at or below the ${fmt(numOr(config.phHi, 7.8), 1)} ceiling; no acid until it is called for.`)),
           h("div", { className: "rec", style: { borderTop: `1.33px solid ${C.g300}`, paddingTop: 12 } },
@@ -2272,10 +2499,8 @@ function Settings({ config, setConfig, learned, effPhEq, effPhEqInfo, latestCya,
         num("s-vol", "Volume (gal)", "volume", 1))),
     h(Card, null, h(CardHead, { title: "Dosing", sub: "container sizes used by the Home actions" }),
       h("div", { className: "grid2" },
-        num("s-jug", "Chlorine jug (fl oz)", "jugOz", 1, { color: colorOf("fc"), ph: "64", hint: "whole jugs of NaOCl 10.5%" }),
-        h("div", { className: "field" }, h("label", { htmlFor: "s-acid", style: { color: colorOf("ph") } }, "Acid default (fl oz)"),
-          h("select", { id: "s-acid", value: ACID_STEPS.includes(Number(config.acidDefaultOz)) ? Number(config.acidDefaultOz) : 43, onChange: e => upd("acidDefaultOz", e.target.value) }, ACID_STEPS.map(v => h("option", { key: v, value: v }, v))),
-          h("span", { className: "hint" }, `steps ${ACID_STEPS.join(" · ")}; ${ACID_STEPS[ACID_STEPS.length - 1]} is the cap`)))),
+        num("s-jug", "Chlorine pour step (fl oz)", "clStepOz", 1, { color: colorOf("fc"), ph: "64", hint: "NaOCl 10.5% is dosed in multiples of this" }),
+        num("s-acid", "Acid default (fl oz)", "acidDefaultOz", 1, { color: colorOf("ph"), ph: "43", hint: `muriatic 31%; stepper offers ${acidStepsFor(config).join(" · ")}, the largest is the cap` }))),
     h(Card, null, h(CardHead, { title: "Target ranges", right: h("span", { className: "hint" }, "low · high") }),
       range("Free chlorine", "fcLo", "fcHi", 0.5, colorOf("fc"), true),
       h("div", { className: "trow sug" }, h("span", { className: "hint" }, canSuggest ? `CYA is ${fmt(latestCya, 0)} ppm → suggested FC ${fmt(latestCya * 0.12)}–${fmt(latestCya * 0.16)} (12–16% of CYA)` : "Log a CYA reading to get a chlorine range suggestion"), h("button", { type: "button", className: "btn-ghost sm", disabled: !canSuggest, onClick: suggestFC }, "Use")),
@@ -2285,11 +2510,11 @@ function Settings({ config, setConfig, learned, effPhEq, effPhEqInfo, latestCya,
       range("Alkalinity", "taLo", "taHi", 10, colorOf("ta"), false),
       range("Calcium hardness", "chLo", "chHi", 10, colorOf("ch"), false)),
     h(Card, null, h(CardHead, { title: "Model" }),
-      h("p", { className: "p" }, `Learned values come from your last ${numOrDef(config.lossWindow, 14)} days of readings and are used when there are 2 or more. Fallbacks apply otherwise.`),
+      h("p", { className: "p" }, `Learned values come from your last ${numOrDef(config.lossWindow, 14)} days of readings and are used when there are 2 or more. Fallbacks apply otherwise. pH is modeled through the carbonate system: acid, bicarbonate and trichlor act on alkalinity and dissolved CO₂, and the same dose moves pH more at low alkalinity.`),
       h("div", { className: "mgrid" },
         h("span"), h("span", { className: "mh" }, "learned"), h("span", { className: "mh" }, "fallback"),
         h("label", { htmlFor: "s-rsun", style: { color: colorOf("fc"), fontWeight: 600 } }, "FC loss / day"), h("span", { className: "mv" }, learned && learned.frac != null ? `${fmt(learned.frac * 100, 0)}%` : "—"), h("input", { id: "s-rsun", type: "number", step: 0.01, inputMode: "decimal", value: config.rSun, onChange: e => upd("rSun", e.target.value) }),
-        h("label", { htmlFor: "s-phk", style: { color: colorOf("ph"), fontWeight: 600 } }, "pH drift k / day"), h("span", { className: "mv" }, learned && learned.phK != null ? fmt(learned.phK, 2) : "—"), h("input", { id: "s-phk", type: "number", step: 0.05, inputMode: "decimal", value: config.phK, onChange: e => upd("phK", e.target.value) }),
+        h("label", { htmlFor: "s-phk", style: { color: colorOf("ph"), fontWeight: 600 } }, "CO₂ outgassing k / day"), h("span", { className: "mv" }, learned && learned.phK != null ? fmt(learned.phK, 2) : "—"), h("input", { id: "s-phk", type: "number", step: 0.05, inputMode: "decimal", value: config.phK, onChange: e => upd("phK", e.target.value) }),
         h("label", { htmlFor: "s-pheq", style: { color: colorOf("ph"), fontWeight: 600 } }, "pH equilibrium"), h("span", { className: "mv" }, effPhEqInfo.source === "override" ? "—" : fmt(effPhEq, 2)), h("input", { id: "s-pheq", type: "number", step: 0.1, inputMode: "decimal", placeholder: "auto", value: config.phEq, onChange: e => upd("phEq", e.target.value) })),
       h("p", { className: "p" }, effPhEqInfo.source === "override" ? `Equilibrium is overridden to ${fmt(effPhEq, 2)}; clear the field to use the chemistry prediction.` : effPhEqInfo.source === "predicted" ? `Equilibrium ${fmt(effPhEq, 2)} is predicted from open-system carbonate chemistry at your latest TA; enter a value to override.` : `Equilibrium is the default ${fmt(effPhEq, 2)} until a reading with pH and TA exists.`),
       h("div", { className: "grid2", style: { borderTop: `1.33px solid ${C.g300}`, paddingTop: 10 } },
