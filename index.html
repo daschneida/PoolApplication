@@ -2,21 +2,181 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<meta name="theme-color" content="#2b2a27" />
-<title>Pool Chemistry Manager</title>
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💧</text></svg>" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<meta name="theme-color" content="#ffffff" />
+<title>Equilibrium · Pool Chemistry</title>
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="default" />
+<meta name="apple-mobile-web-app-title" content="Equilibrium" />
+<meta name="mobile-web-app-capable" content="yes" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1024 1024'%3E%3Crect width='1024' height='1024' rx='229' fill='%2306b6d4'/%3E%3Cg fill='none' stroke='%231e3a8a' stroke-width='26' opacity='.45'%3E%3Cellipse cx='512' cy='815' rx='310' ry='72'/%3E%3Cellipse cx='512' cy='815' rx='175' ry='41'/%3E%3C/g%3E%3Cpath d='M512 110C512 110 300 380 300 530A212 212 0 0 0 724 530C724 380 512 110 512 110Z' fill='%23fff'/%3E%3Cpath d='M300 575C370 548 430 605 500 578C570 551 640 608 724 575L724 530A212 212 0 0 1 300 530Z' fill='%231e3a8a'/%3E%3C/svg%3E" />
+<link rel="apple-touch-icon" sizes="180x180" href="icon-180.png" />
+<link rel="manifest" href="manifest.webmanifest" />
 <style>
+  :root { --blue:#1e3a8a; --teal:#06b6d4; --coral:#b45309; --green:#115e59; --mint:#a5f3fc; --red:#dc2626; --gold:#f59e0b; --g100:#f1f5f9; --g300:#cbd5e1; --g500:#64748b; --ink:#0f172a; --rule:1px solid #cbd5e1;
+          --r:14px; --rs:10px; --font:-apple-system,BlinkMacSystemFont,'SF Pro Text',Inter,'Segoe UI',Roboto,Helvetica,Arial,sans-serif; }
   * { box-sizing: border-box; -webkit-font-smoothing: antialiased; }
-  html, body { margin: 0; padding: 0; background: #fcfbf7; }
+  html, body { margin: 0; padding: 0; background: #fff; color: var(--ink); font-family: var(--font); }
   #root { min-height: 100vh; }
-  button:hover { opacity: .92; }
-  input:focus, select:focus { outline: none; border-color: #2f6fb0 !important; }
+  button, input, select { font: inherit; color: inherit; }
+  button { cursor: pointer; }
+  button:disabled { opacity: .4; cursor: default; }
+  input:focus, select:focus, button:focus-visible { outline: 2px solid var(--blue); outline-offset: 1px; }
+  input[type=number] { -moz-appearance: textfield; }
+  input::-webkit-outer-spin-button, input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
   ::-webkit-scrollbar { width: 8px; height: 8px; }
-  ::-webkit-scrollbar-thumb { background: #ddd9cf; border-radius: 4px; }
-  @media (max-width: 720px) {
-    .two-col { grid-template-columns: 1fr !important; }
-  }
+  ::-webkit-scrollbar-thumb { background: var(--g300); }
+
+  .app { max-width: 560px; margin: 0 auto; padding: 0 16px calc(88px + env(safe-area-inset-bottom, 0px)); }
+  .page { display: flex; flex-direction: column; gap: 14px; padding-top: 4px; }
+  .p { margin: 0; font-size: 13px; line-height: 1.45; }
+  .p.lead { font-size: 14px; }
+  .hint { font-size: 12px; line-height: 1.35; }
+  .note { font-size: 12px; font-style: italic; line-height: 1.4; margin-top: 8px; }
+  .foot { font-size: 12px; line-height: 1.45; padding: 4px 0 8px; }
+  .row-between { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+  .rule { padding-bottom: 8px; border-bottom: 1px solid var(--ink); }
+
+  .topbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: calc(14px + env(safe-area-inset-top, 0px)) 0 12px; }
+  .topbar-left { display: flex; align-items: center; gap: 10px; min-width: 0; }
+  .topbar-title { font-size: 17px; font-weight: 700; line-height: 1.1; }
+  .topbar-sub { font-size: 12px; line-height: 1.2; margin-top: 2px; }
+  .sync { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; white-space: nowrap; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+  .sq { width: 10px; height: 10px; display: inline-block; flex: 0 0 10px; }
+
+  .banner { display: flex; align-items: center; gap: 10px; padding: 10px 12px; background: var(--g100); border-radius: var(--rs); font-size: 13px; line-height: 1.3; }
+  .sq { border-radius: 3px; }
+  .card { border: var(--rule); border-radius: var(--r); padding: 14px 16px 16px; display: flex; flex-direction: column; gap: 10px; background: #fff; }
+  .card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+  .card-title { margin: 0; font-size: 14px; font-weight: 700; line-height: 1.2; }
+  .card-sub { font-size: 12px; margin-top: 2px; }
+  .chip { font-size: 12px; font-weight: 600; padding: 4px 9px; white-space: nowrap; border-radius: 999px; }
+
+  .hero-row { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; }
+  .hero-val { display: flex; align-items: baseline; gap: 6px; font-size: 52px; font-weight: 700; line-height: 1; }
+  .hero-val.mid { font-size: 36px; }
+  .hero-val .unit, .lt-v .unit { font-size: 15px; font-weight: 400; }
+  .hero-side { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; font-size: 13px; line-height: 1.25; text-align: right; }
+  .mini .recharts-wrapper { cursor: default; }
+  .mini-axis, .gauge-axis { display: flex; justify-content: space-between; font-size: 11px; margin-top: 2px; }
+  .mini-empty { font-size: 12px; font-style: italic; padding: 8px 0; }
+  .allgood { font-size: 13px; line-height: 1.4; padding: 10px 12px; background: var(--g100); border-radius: var(--rs); }
+
+  .dosebox { display: flex; flex-direction: column; gap: 10px; padding: 12px 14px; background: var(--g100); border-radius: var(--rs); }
+  .dose-k { font-size: 12px; font-weight: 600; }
+  .dose-amt { font-size: 15px; font-weight: 700; line-height: 1.2; margin: 2px 0; }
+  .dose-line { font-size: 12px; line-height: 1.35; }
+  .dose-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+  .dose-note { font-size: 11px; line-height: 1.3; }
+  .stepper { display: flex; align-items: center; border: 1px solid var(--ink); background: #fff; border-radius: var(--rs); overflow: hidden; }
+  .stepper button { width: 44px; height: 44px; border: 0; background: #fff; font-size: 20px; }
+  .stepper span { min-width: 76px; height: 44px; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 700; border-left: 1px solid var(--ink); border-right: 1px solid var(--ink); }
+
+  .btn-primary { height: 44px; padding: 0 16px; border: 0; background: var(--blue); color: #fff; font-size: 14px; font-weight: 600; flex: 1 1 auto; border-radius: var(--rs); }
+  .btn-primary.tall { height: 52px; font-size: 16px; width: 100%; }
+  .btn-ghost { height: 44px; padding: 0 14px; border: 1px solid var(--blue); background: #fff; color: var(--blue); font-size: 13px; font-weight: 600; border-radius: var(--rs); }
+  .btn-ghost.sm { height: 36px; padding: 0 12px; font-size: 12px; }
+  .btn-ghost.full { width: 100%; margin-top: 10px; border-color: var(--ink); color: var(--ink); font-size: 14px; }
+  .btn-danger { height: 44px; border: 1px solid var(--red); background: #fff; color: var(--red); font-size: 14px; font-weight: 600; border-radius: var(--rs); }
+  .icon-btn { width: 40px; height: 40px; border: var(--rule); background: #fff; display: flex; align-items: center; justify-content: center; flex: 0 0 40px; border-radius: var(--rs); }
+
+  .gauge { position: relative; height: 10px; display: flex; margin-top: 4px; border-radius: 5px; overflow: visible; }
+  .gauge > div:first-child { border-radius: 5px 0 0 5px; } .gauge > div:nth-child(5) { border-radius: 0 5px 5px 0; }
+  .gauge > div:not(.gauge-pin) { width: 20%; height: 10px; }
+  .gauge-pin { position: absolute; top: -4px; width: 3px; height: 18px; background: var(--ink); transform: translateX(-50%); border-radius: 2px; }
+  .tabar { position: relative; height: 12px; background: var(--g100); margin-top: 4px; border-radius: 6px; }
+  .tabar-box { position: absolute; top: 0; height: 12px; background: var(--mint); }
+  .tabar-pin { position: absolute; top: -4px; width: 3px; height: 20px; transform: translateX(-50%); }
+  .sunbar { display: flex; height: 14px; }
+
+  .lt { display: flex; flex-direction: column; gap: 8px; }
+  .lt-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; font-size: 12px; }
+  .lt-grid, .grid3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+  .grid2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .grid5 { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; }
+  .grid5 > div { display: flex; flex-direction: column; gap: 2px; font-size: 12px; }
+  .grid5 b { font-size: 16px; }
+  .lt-card { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; padding: 12px; border: var(--rule); background: #fff; text-align: left; border-radius: var(--rs); }
+  .lt-k { font-size: 12px; font-weight: 600; }
+  .lt-v { display: flex; align-items: baseline; gap: 3px; font-size: 24px; font-weight: 700; line-height: 1; }
+  .lt-v .unit { font-size: 11px; }
+  .lt-s { font-size: 11px; }
+
+  .pchips { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; width: 100%; }
+  .pchip { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 10px 12px; border: var(--rule); background: #fff; text-align: left; border-radius: var(--rs); }
+  .pchip-sm { flex-direction: row; align-items: baseline; justify-content: space-between; padding: 8px 12px; background: var(--g100); }
+  .pchip-on { border-width: 2px; padding: 9px 11px; background: #fff; }
+  .pchip-sm.pchip-on { padding: 7px 11px; }
+  .pchip-k { font-size: 12px; font-weight: 600; }
+  .pchip-v { font-size: 20px; font-weight: 700; line-height: 1; }
+  .pchip-sm .pchip-v { font-size: 15px; }
+  .seg { display: flex; border: 1px solid var(--ink); border-radius: var(--rs); overflow: hidden; }
+  .seg button { height: 32px; padding: 0 10px; border: 0; background: #fff; font-size: 13px; }
+  .seg button + button { border-left: 1px solid var(--ink); }
+  .seg .seg-on { background: var(--ink); color: #fff; font-weight: 600; }
+  .seg-wide { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .seg-wide button { height: 44px; font-size: 15px; }
+  .legend { display: flex; flex-wrap: wrap; gap: 8px 14px; font-size: 12px; margin-top: 6px; }
+  .legend span, .hist-main { display: inline-flex; align-items: center; gap: 6px; }
+  .lg-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+  .lg-hollow { background: #fff; border: 2px solid #334155; }
+  .lg-dash { width: 16px; height: 0; border-top: 2px dashed; display: inline-block; }
+  .lg-band { width: 14px; height: 10px; background: var(--mint); display: inline-block; }
+  .pt-grid { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 6px; font-size: 12px; }
+  .pt-grid > div { display: flex; flex-direction: column; gap: 2px; }
+  .pt-grid b { font-size: 15px; }
+  .tip { background: #fff; border: 1px solid var(--ink); padding: 8px 10px; font-size: 12px; border-radius: var(--rs); }
+  .tip-val { font-size: 18px; font-weight: 700; margin: 2px 0; }
+
+  .field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+  .field label, .field .lab { font-size: 13px; font-weight: 600; }
+  .field input, .field select { height: 46px; border: var(--rule); padding: 0 12px; background: #fff; font-size: 16px; width: 100%; min-width: 0; border-radius: var(--rs); }
+  .field .ro { height: 46px; display: flex; align-items: center; font-size: 16px; }
+  .field.big { border: 2px solid; padding: 10px 12px 8px; border-radius: var(--rs); }
+  .big-in { display: flex; align-items: center; gap: 6px; }
+  .big-in input { border: 0; padding: 0; height: 44px; font-size: 30px; font-weight: 700; }
+  .big-in span { font-size: 13px; }
+  .sect-k { font-size: 12px; font-weight: 600; }
+  .preview { background: var(--g100); padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; border-radius: var(--rs); }
+  .suggest { display: flex; flex-direction: column; gap: 10px; padding: 12px 14px; background: var(--g100); border-radius: var(--rs); }
+  .sug-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+  .sug-row + .sug-row { border-top: var(--rule); padding-top: 10px; }
+  .sug-row b { font-size: 15px; }
+  .hist-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 8px; border-radius: 8px; }
+  .hist-main { font-size: 14px; font-weight: 600; }
+  .stat { display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; background: var(--g100); font-size: 12px; border-radius: var(--rs); }
+  .stat b { font-size: 28px; line-height: 1; }
+  .rec { display: flex; flex-direction: column; gap: 8px; }
+  .rec-amt { display: flex; align-items: baseline; gap: 8px; font-size: 14px; font-weight: 600; }
+  .rec-amt b { font-size: 20px; }
+  .trow { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-bottom: var(--rule); font-size: 14px; }
+  .trow > span:first-child { flex: 1 1 auto; }
+  .trow input { width: 64px; height: 40px; border: var(--rule); padding: 0 6px; text-align: center; font-size: 15px; background: #fff; border-radius: 8px; }
+  .trow.sug { padding: 8px 0; }
+  .trow:last-child { border-bottom: 0; }
+  .mgrid { display: grid; grid-template-columns: 1fr 76px 76px; gap: 8px 10px; align-items: center; font-size: 13px; }
+  .mh { font-size: 12px; font-weight: 600; text-align: center; }
+  .mv { text-align: center; font-weight: 700; padding: 10px 0; background: var(--g100); border-radius: 8px; }
+  .mgrid input { height: 40px; border: var(--rule); padding: 0 6px; text-align: center; font-size: 14px; width: 100%; background: #fff; border-radius: 8px; }
+
+  .toast { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(76px + env(safe-area-inset-bottom, 0px)); width: calc(100% - 32px); max-width: 528px; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px; background: var(--ink); color: #fff; font-size: 14px; z-index: 20; border-radius: var(--r); }
+  .toast-undo { height: 36px; padding: 0 14px; border: 1px solid #fff; background: transparent; color: #fff; font-weight: 600; border-radius: 8px; }
+  .splash { position: fixed; inset: 0; z-index: 50; background: #fff; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px; padding: 32px; text-align: center; transition: opacity .45s ease; }
+  .splash-out { opacity: 0; pointer-events: none; }
+  .splash-icon { width: 96px; height: 96px; }
+  .mark-svg { border-radius: 22%; }
+  .splash-name { font-size: 26px; font-weight: 700; letter-spacing: .01em; line-height: 1; }
+  .splash-by { font-size: 13px; margin-top: -10px; }
+  .splash-tag { position: absolute; bottom: calc(28px + env(safe-area-inset-bottom, 0px)); font-size: 12px; letter-spacing: .04em; }
+  .splash-hi { font-size: 13px; }
+  .splash-msg { max-width: 360px; font-size: 22px; font-weight: 700; line-height: 1.25; }
+  .splash-rule { width: 40px; height: 4px; background: var(--teal); border-radius: 2px; }
+  .tabbar { position: fixed; left: 0; right: 0; bottom: 0; background: #fff; border-top: var(--rule); padding-bottom: env(safe-area-inset-bottom, 0px); z-index: 10; }
+  .tabbar-inner { max-width: 560px; margin: 0 auto; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); height: 64px; }
+  .tab { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; border: 0; background: #fff; font-size: 11px; color: var(--ink); border-top: 3px solid transparent; margin-top: -1px; }
+  .tab-active { color: var(--blue); font-weight: 700; border-top-color: var(--blue); }
+  @media (min-width: 700px) { .app { max-width: 640px; } .tabbar-inner, .toast { max-width: 640px; } .hero-val { font-size: 56px; } }
 </style>
 </head>
 <body>
@@ -368,8 +528,10 @@ const {
   CartesianGrid,
   Tooltip,
   ResponsiveContainer,
-  ReferenceArea
+  ReferenceArea,
+  ReferenceLine
 } = Recharts;
+const h = React.createElement;
 
 /* ===== Additive coefficients (ppm*gal/oz) from your spreadsheet ===== */
 const ADDITIVES = {
@@ -482,42 +644,42 @@ const PARAMS = [{
   key: "fc",
   label: "Free Chlorine",
   unit: "ppm",
-  color: "#2f6fb0",
+  color: "#0369a1",
   lo: 2,
   hi: 6
 }, {
   key: "ph",
   label: "pH",
   unit: "",
-  color: "#c07a18",
+  color: "#b45309",
   lo: 7.4,
   hi: 7.8
 }, {
   key: "cya",
   label: "Cyanuric Acid",
   unit: "ppm",
-  color: "#3f8f6f",
+  color: "#047857",
   lo: 40,
   hi: 60
 }, {
   key: "ta",
   label: "Alkalinity",
   unit: "ppm",
-  color: "#8a6fc0",
+  color: "#6d28d9",
   lo: 80,
   hi: 120
 }, {
   key: "ch",
-  label: "Calcium Hard.",
+  label: "Calcium hardness",
   unit: "ppm",
-  color: "#b0556f",
+  color: "#be185d",
   lo: 200,
   hi: 400
 }, {
   key: "csi",
-  label: "Saturation Idx",
+  label: "Saturation index",
   unit: "",
-  color: "#506070",
+  color: "#334155",
   lo: -0.3,
   hi: 0.3
 }];
@@ -777,12 +939,14 @@ function App() {
     csiHi: 0.3,
     sunStart: 11,
     sunEnd: 17,
-    sunRamp: 1
+    sunRamp: 1,
+    jugOz: 64,
+    acidDefaultOz: 43
   });
   const [measurements, setMeasurements] = useState([]);
   const [doses, setDoses] = useState([]);
   const [loaded, setLoaded] = useState(false);
-  const [tab, setTab] = useState("dashboard");
+  const [tab, setTab] = useState("home");
   const [focus, setFocus] = useState("fc");
   const [syncStatus, setSyncStatus] = useState(SYNC_ON ? "connecting" : "local");
 
@@ -1284,40 +1448,6 @@ function App() {
       phLimit
     };
   }, [series]);
-  const recs = useMemo(() => {
-    if (!latest) return [];
-    const r = [];
-    const mid = (loK, hiK, dlo, dhi) => {
-      const lo = config[loK],
-        hi = config[hiK];
-      const L = lo === "" || lo == null || isNaN(lo) ? dlo : Number(lo),
-        H = hi === "" || hi == null || isNaN(hi) ? dhi : Number(hi);
-      return (L + H) / 2;
-    };
-    // Chlorine: aim for the midpoint of the FC target range. Note the 14%-of-CYA guideline.
-    const fcMid = mid("fcLo", "fcHi", 2, 6);
-    if (latest.fc != null && latest.fc < fcMid) {
-      const oz = (fcMid - latest.fc) * config.volume / ADDITIVES["NaOCl (10.5 wt%)"].Cl;
-      const cyaNote = latest.cya != null ? ` (14% of CYA ≈ ${fmt(latest.cya * 0.14)} ppm)` : "";
-      r.push({
-        chem: "NaOCl (10.5 wt%)",
-        oz: Math.round(oz),
-        reason: `raise FC to ${fmt(fcMid)} ppm${cyaNote}`
-      });
-    }
-    // pH: if above the range, bring down to the pH range midpoint with acid.
-    const phMid = mid("phLo", "phHi", 7.4, 7.8);
-    const phHi = config.phHi === "" || config.phHi == null || isNaN(config.phHi) ? 7.8 : Number(config.phHi);
-    if (latest.ph != null && latest.ph > phHi) {
-      const oz = (latest.ph - phMid) * config.volume / Math.abs(ADDITIVES["Muriatic acid (14%)"].pH);
-      r.push({
-        chem: "Muriatic acid (14%)",
-        oz: Math.round(oz),
-        reason: `lower pH from ${fmt(latest.ph, 2)} to ${fmt(phMid, 2)}`
-      });
-    }
-    return r;
-  }, [latest, config]);
   function exportCSV() {
     const lines = [];
     lines.push("# POOL CHEMISTRY EXPORT  generated " + new Date().toISOString());
@@ -1352,618 +1482,634 @@ function App() {
     a.click();
     URL.revokeObjectURL(url);
   }
-  if (!loaded) return /*#__PURE__*/React.createElement("div", {
-    style: {
-      padding: 40,
-      fontFamily: "system-ui",
-      color: "#667"
-    }
-  }, "Loading\u2026");
-  return /*#__PURE__*/React.createElement("div", {
-    style: S.app
-  }, /*#__PURE__*/React.createElement("header", {
-    style: S.header
-  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
-    style: S.kicker
-  }, "POOL CHEMISTRY MANAGER"), /*#__PURE__*/React.createElement("h1", {
-    style: S.h1
-  }, config.name || "My Pool", " \xB7 ", Number(config.volume || 0).toLocaleString(), " gal")), /*#__PURE__*/React.createElement("div", {
-    style: S.headRight
-  }, /*#__PURE__*/React.createElement("div", {
-    style: S.calib
-  }, /*#__PURE__*/React.createElement("span", {
-    style: S.calibLabel
-  }, "Chlorine loss"), /*#__PURE__*/React.createElement("span", {
-    style: S.calibVal
-  }, learned && learned.totalLoss != null ? fmt(learned.totalLoss) : "—", " ppm/day"), /*#__PURE__*/React.createElement("span", {
-    style: S.calibNote
-  }, learned && learned.totalLoss != null ? `over ${learned.spanDays >= 1 ? Math.round(learned.spanDays) : learned.spanDays.toFixed(1)} days · ${learned.n} readings (last ${learned.win}d window)` : `need 2+ readings in last ${config.lossWindow || 14} days`), (() => {
-    // Sun-hour half-life: if the calendar-day fraction f is all lost during the W-hour
-    // sun window, then (1-f) = exp(-k_hr · W), so k_hr = -ln(1-f) / W per sun-hour.
-    // Half-life t½ = ln(2) / k_hr. Display-only; no model change.
-    if (!learned || learned.frac == null) return null;
-    const sunStart = Number(config.sunStart);
-    const sunEnd = Number(config.sunEnd);
-    if (!isFinite(sunStart) || !isFinite(sunEnd)) return null;
-    const W = sunEnd - sunStart;
-    if (!(W > 0 && W < 24)) return null;
-    const f = Math.max(0, Math.min(0.95, learned.frac));
-    if (f <= 0) return null;
-    const k_per_hour = -Math.log(1 - f) / W;
-    if (!(k_per_hour > 0) || !isFinite(k_per_hour)) return null;
-    const halfLife = Math.log(2) / k_per_hour;
-    const text = halfLife < 10 ? halfLife.toFixed(1) : Math.round(halfLife).toString();
-    return /*#__PURE__*/React.createElement("span", {
-      style: { ...S.calibNote, fontStyle: "italic", marginTop: 2 }
-    }, `sun-hour half-life \u2248 ${text} h`);
-  })()), /*#__PURE__*/React.createElement("div", {
-    style: S.syncCol
-  }, /*#__PURE__*/React.createElement("span", {
-    style: {
-      ...S.syncBadge,
-      background: syncStatus === "synced" ? "#e7f3ec" : syncStatus === "offline" ? "#fbeceb" : syncStatus === "connecting" ? "#f4f6fa" : "#f1efe8",
-      color: syncStatus === "synced" ? "#2c7a4b" : syncStatus === "offline" ? "#b23b39" : syncStatus === "connecting" ? "#2f5080" : "#6a6860"
-    }
-  }, syncStatus === "synced" ? "● cloud synced" : syncStatus === "offline" ? "● offline (cached)" : syncStatus === "connecting" ? "○ connecting…" : "○ local only"), /*#__PURE__*/React.createElement("button", {
-    onClick: exportCSV,
-    style: S.exportBtn
-  }, "\u2193 Export CSV")))), /*#__PURE__*/React.createElement("nav", {
-    style: S.tabs
-  }, ["dashboard", "log", "advisor", "settings"].map(t => /*#__PURE__*/React.createElement("button", {
-    key: t,
-    onClick: () => setTab(t),
-    style: {
-      ...S.tab,
-      ...(tab === t ? S.tabActive : {})
-    }
-  }, t[0].toUpperCase() + t.slice(1)))), tab === "dashboard" && /*#__PURE__*/React.createElement(Dashboard, {
-    series,
-    chartSeries,
-    latest,
-    focus,
-    setFocus,
-    forecast,
-    recs,
-    config,
-    learned,
-    effFrac,
-    effPhK,
-    effPhEq,
-    effPhEqInfo,
-    lastMeasTs: measurements.length ? Math.max(...measurements.map(tsOf)) : null
-  }), tab === "log" && /*#__PURE__*/React.createElement(LogTab, {
-    measurements,
-    setMeasurements,
-    doses,
-    setDoses,
-    config,
-    latest
-  }), tab === "advisor" && /*#__PURE__*/React.createElement(Advisor, {
-    measurements,
-    latest,
-    config,
-    learned,
-    effFrac
-  }), tab === "settings" && /*#__PURE__*/React.createElement(Settings, {
-    config,
-    setConfig,
-    learned,
-    effPhEq,
-    effPhEqInfo,
-    latestCya: latest ? latest.cya : null,
-    onReset: () => {
-      setMeasurements([]);
-      setDoses([]);
-    },
-    onReseed: () => {
-      setMeasurements(SEED.measurements);
-      setDoses(SEED.doses);
-    }
-  }), /*#__PURE__*/React.createElement("footer", {
-    style: S.footer
-  }, "FC decay: ", learned && learned.frac != null ? `dynamic ${fmt(learned.frac * 100, 0)}%/day (from measured loss ÷ avg FC)` : `fallback ${fmt((config.rSun || 0.45) * 100, 0)}%/day`, ". pH drift: ", learned && learned.phK != null ? `dynamic k=${fmt(learned.phK, 2)}/day toward ${fmt(effPhEq, 2)} (${effPhEqInfo.source==="override"?"override":effPhEqInfo.source==="predicted"?"predicted":"default"}; learned from your pH readings & dose history)` : `fallback k=${fmt(config.phK || 0.55, 2)}/day toward ${fmt(effPhEq, 2)} (${effPhEqInfo.source})`, ". Additive coefficients & CSI equation from your spreadsheet. ", SYNC_ON ? "Synced across your devices via Supabase; Export CSV for an extra backup." : "Data saved in this browser; use Export CSV to back it up."));
-}
-function Dashboard({
-  series,
-  chartSeries,
-  latest,
-  focus,
-  setFocus,
-  forecast,
-  recs,
-  config,
-  learned,
-  effFrac,
-  effPhK,
-  effPhEq,
-  effPhEqInfo,
-  lastMeasTs
-}) {
-  const p = PARAMS.find(x => x.key === focus);
-  const measuredPts = chartSeries.filter(s => s._meas && s._meas[focus]);
-  // target ranges come from Settings (config), falling back to PARAMS defaults
-  const rangeOf = key => {
-    const lo = config[key + "Lo"],
-      hi = config[key + "Hi"];
-    const def = PARAMS.find(x => x.key === key);
-    return {
-      lo: lo === "" || lo == null || isNaN(lo) ? def.lo : Number(lo),
-      hi: hi === "" || hi == null || isNaN(hi) ? def.hi : Number(hi)
+  // ===================== DOSING PLAN (container-sized) =====================
+  // Chlorine: whole jugs of NaOCl. Suggested whenever FC is below the low bound now or the
+  // forecast crosses it inside the chart window. Overshoot inside/above range is accepted.
+  // Acid: suggested only while pH is above the range high. Fixed container steps, hard cap.
+  const CL_CHEM = "NaOCl (10.5 wt%)";
+  const ACID_CHEM = "Muriatic acid (31%)";
+  const curTemp = useMemo(() => {
+    const withTemp = measurements.filter(m => m.temp != null && m.temp !== "").slice().sort((a, b) => tsOf(a) - tsOf(b));
+    return withTemp.length ? Number(withTemp[withTemp.length - 1].temp) : Number(config.temp) || 85;
+  }, [measurements, config.temp]);
+  const plan = useMemo(() => {
+    const num = (v, d) => v === "" || v == null || isNaN(v) ? d : Number(v);
+    const out = {
+      cl: null,
+      acid: null,
+      fcLo: num(config.fcLo, 2),
+      fcHi: num(config.fcHi, 6),
+      phLo: num(config.phLo, 7.4),
+      phHi: num(config.phHi, 7.8)
     };
+    if (!latest) return out;
+    const V = num(config.volume, 19000);
+    const jug = Math.max(1, num(config.jugOz, 64));
+    if (latest.fc != null) {
+      let crossing = null;
+      if (latest.fc < out.fcLo) crossing = { days: 0, date: latest.date };
+      else for (const s of series) {
+        if (s._future && s.fc != null && s.fc < out.fcLo) {
+          crossing = { days: Math.max(0, Math.round((s.t - latest.t) / MS_DAY)), date: s.date };
+          break;
+        }
+      }
+      if (crossing) out.cl = { chem: CL_CHEM, step: jug, defaultOz: jug, perOz: ADDITIVES[CL_CHEM].Cl / V, crossing };
+    }
+    if (latest.ph != null && latest.ph > out.phHi) {
+      const a = ADDITIVES[ACID_CHEM];
+      const def = num(config.acidDefaultOz, 43);
+      out.acid = {
+        chem: ACID_CHEM,
+        steps: ACID_STEPS,
+        defaultOz: ACID_STEPS.includes(def) ? def : 43,
+        phPerOz: a.pH / V,
+        taPerOz: a.TA / V
+      };
+    }
+    return out;
+  }, [latest, series, config]);
+
+  // Write a dose now (timestamped to the minute) and offer an undo.
+  const [toast, setToast] = useState(null);
+  useEffect(() => {
+    if (!toast) return;
+    const id = setTimeout(() => setToast(null), 8000);
+    return () => clearTimeout(id);
+  }, [toast]);
+  const logDoseNow = (chem, oz) => {
+    const row = { ts: nowLocalDT(), chem, oz: Number(oz) };
+    setDoses(prev => [...prev, row]);
+    setToast({
+      msg: `Logged ${oz} ${ADDITIVES[chem].unit} ${chem}`,
+      undo: () => setDoses(prev => {
+        const i = prev.lastIndexOf(row);
+        if (i < 0) return prev.filter(d => !(d.ts === row.ts && d.chem === row.chem && d.oz === row.oz));
+        const next = prev.slice();
+        next.splice(i, 1);
+        return next;
+      })
+    });
   };
-  const pRange = rangeOf(focus);
-  // Measurement reminder: gentle after 3 days, urgent after 5 days.
-  // Returns null (no banner), or a React element banner.
-  const reminderBanner = (() => {
-    if (lastMeasTs == null) return null;
-    const daysSince = (Date.now() - lastMeasTs) / MS_DAY;
-    if (daysSince < 3) return null;
-    const isUrgent = daysSince >= 5;
-    const dayText = daysSince < 1 ? "today" : daysSince < 2 ? "yesterday" : `${Math.floor(daysSince)} days ago`;
-    const message = isUrgent
-      ? `It's been ${Math.floor(daysSince)} days since your last measurement. The forecast becomes less reliable without recent data — please log a reading soon.`
-      : `Your last measurement was ${dayText}. Consider logging a fresh reading to keep the forecast accurate.`;
-    return /*#__PURE__*/React.createElement("div", {
-      style: isUrgent ? S.reminderUrgent : S.reminderGentle
-    }, message);
-  })();
-  return /*#__PURE__*/React.createElement("div", null, reminderBanner, /*#__PURE__*/React.createElement("div", {
-    style: S.cards
-  }, PARAMS.map(par => {
-    const v = latest ? latest[par.key] : null;
-    const rg = rangeOf(par.key);
-    const inR = v != null && v >= rg.lo && v <= rg.hi;
-    return /*#__PURE__*/React.createElement("button", {
-      key: par.key,
-      onClick: () => setFocus(par.key),
-      style: {
-        ...S.card,
-        ...(focus === par.key ? {
-          borderColor: par.color,
-          boxShadow: `0 0 0 2px ${par.color}22`
-        } : {})
-      }
-    }, /*#__PURE__*/React.createElement("div", {
-      style: S.cardLabel
-    }, par.label), /*#__PURE__*/React.createElement("div", {
-      style: {
-        ...S.cardVal,
-        color: par.color
-      }
-    }, par.key === "csi" ? fmt(v, 2) : fmt(v, par.key === "ph" ? 2 : v >= 100 ? 0 : 1), /*#__PURE__*/React.createElement("span", {
-      style: S.cardUnit
-    }, par.unit)), /*#__PURE__*/React.createElement("div", {
-      style: {
-        ...S.chip,
-        background: inR ? "#e7f3ec" : "#fbeceb",
-        color: inR ? "#2c7a4b" : "#b23b39"
-      }
-    }, v == null ? "no data" : inR ? "in range" : v < rg.lo ? "low" : "high"));
-  })), latest && latest._anchorT && (() => {
-    const anchorDate = new Date(latest._anchorT);
-    const nowDate = new Date(latest.t);
-    const fmtDT = d => `${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
-    const hrs = latest._projectedFromHours;
-    if (hrs < 1) return null; // anchor is essentially now, no projection note
-    return /*#__PURE__*/React.createElement("div", {
-      style: S.projNote
-    }, "Values shown are projected to ", fmtDT(nowDate), " from your last entry on ", fmtDT(anchorDate), " (", hrs < 24 ? `${Math.round(hrs)}h` : `${(hrs / 24).toFixed(1)}d`, " of model)");
-  })(), /*#__PURE__*/React.createElement("div", {
-    className: "two-col",
-    style: S.insightRow
-  }, /*#__PURE__*/React.createElement("div", {
-    style: S.insight
-  }, /*#__PURE__*/React.createElement("div", {
-    style: S.insightK
-  }, "Forecast"), /*#__PURE__*/React.createElement("div", {
-    style: S.insightV
-  }, (() => {
-    const phrase = c => c == null ? null : c.days <= 0 ? "already" : c.days === 1 ? "in 1 day" : `in ${c.days} days`;
-    const fc = forecast && forecast.fcBelow1,
-      ph = forecast && forecast.phAbove;
-    return /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", null, fc ? /*#__PURE__*/React.createElement("span", null, "FC drops below 1 ppm ", /*#__PURE__*/React.createElement("b", null, phrase(fc)), fc.days > 0 ? ` (${fc.date})` : "") : /*#__PURE__*/React.createElement("span", null, "FC stays above 1 ppm through the forecast")), /*#__PURE__*/React.createElement("div", {
-      style: {
-        marginTop: 4
-      }
-    }, ph ? /*#__PURE__*/React.createElement("span", null, "pH rises above ", forecast.phLimit, " ", /*#__PURE__*/React.createElement("b", null, phrase(ph)), ph.days > 0 ? ` (${ph.date})` : "") : /*#__PURE__*/React.createElement("span", null, "pH stays at or below ", forecast ? forecast.phLimit : 7.9, " through the forecast")));
-  })())), /*#__PURE__*/React.createElement("div", {
-    style: S.insight
-  }, /*#__PURE__*/React.createElement("div", {
-    style: S.insightK
-  }, "Water balance (CSI)"), /*#__PURE__*/React.createElement("div", {
-    style: S.insightV
-  }, latest?.csi == null ? "Need all 5 inputs to compute" : (() => {
-    const c = latest.csi;
-    const v = fmt(c, 2);
-    if (c <= -0.6) return /*#__PURE__*/React.createElement("span", null, "Corrosive (", v, ") \u2014 plaster damage likely; raise pH/alkalinity/calcium");
-    if (c <= -0.3) return /*#__PURE__*/React.createElement("span", null, "Slightly corrosive (", v, ") \u2014 trending corrosive; raise pH/alkalinity/calcium");
-    if (c <  0.3)  return /*#__PURE__*/React.createElement("span", null, "Balanced (", v, ") \u2713");
-    if (c <  0.6)  return /*#__PURE__*/React.createElement("span", null, "Slightly scaling (", v, ") \u2014 trending scale-forming; lower pH/alkalinity");
-    return /*#__PURE__*/React.createElement("span", null, "Scaling (", v, ") \u2014 scale likely; lower pH/alkalinity");
-  })()))), recs.length > 0 && /*#__PURE__*/React.createElement("div", {
-    style: S.recBox
-  }, /*#__PURE__*/React.createElement("div", {
-    style: S.recTitle
-  }, "Suggested additions today"), recs.map((r, i) => /*#__PURE__*/React.createElement("div", {
-    key: i,
-    style: S.recRow
-  }, /*#__PURE__*/React.createElement("span", {
-    style: S.recDose
-  }, r.oz, " ", ADDITIVES[r.chem]?.unit), /*#__PURE__*/React.createElement("span", {
-    style: S.recChem
-  }, r.chem), /*#__PURE__*/React.createElement("span", {
-    style: S.recReason
-  }, r.reason)))), /*#__PURE__*/React.createElement("div", {
-    style: S.chartWrap
-  }, /*#__PURE__*/React.createElement("div", {
-    style: S.chartHead
-  }, /*#__PURE__*/React.createElement("span", {
-    style: {
-      fontWeight: 600,
-      color: p.color,
-      fontSize: 15
-    }
-  }, p.label), /*#__PURE__*/React.createElement("span", {
-    style: S.chartLegend
-  }, /*#__PURE__*/React.createElement("span", {
-    style: S.dotSolid(p.color)
-  }), " measured\xA0\xA0", /*#__PURE__*/React.createElement("span", {
-    style: S.dotHollow("#9a9890")
-  }), " additive\xA0\xA0", /*#__PURE__*/React.createElement("span", {
-    style: S.shadeKey
-  }), " target")), /*#__PURE__*/React.createElement(ResponsiveContainer, {
-    width: "100%",
-    height: 300
-  }, /*#__PURE__*/React.createElement(LineChart, {
-    data: chartSeries,
-    margin: {
-      top: 8,
-      right: 16,
-      bottom: 4,
-      left: -8
-    }
-  }, /*#__PURE__*/React.createElement(CartesianGrid, {
-    stroke: "#eceae3",
-    vertical: false
-  }), /*#__PURE__*/React.createElement(XAxis, {
-    dataKey: "t",
-    type: "number",
-    scale: "time",
-    domain: ["dataMin", "dataMax"],
-    tick: {
-      fontSize: 11,
-      fill: "#8a877e"
-    },
-    tickFormatter: t => {
-      const d = new Date(t);
-      return `${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-    },
-    minTickGap: 36
-  }), /*#__PURE__*/React.createElement(YAxis, {
-    tick: {
-      fontSize: 11,
-      fill: "#8a877e"
-    },
-    domain: ["auto", "auto"],
-    width: 44
-  }), /*#__PURE__*/React.createElement(Tooltip, {
-    content: /*#__PURE__*/React.createElement(ChemTooltip, {
-      param: p
-    })
-  }), /*#__PURE__*/React.createElement(ReferenceArea, {
-    y1: pRange.lo,
-    y2: pRange.hi,
-    fill: p.color,
-    fillOpacity: 0.07
-  }), /*#__PURE__*/React.createElement(Line, {
-    type: "monotone",
-    dataKey: focus,
-    stroke: p.color,
-    strokeWidth: 2,
-    connectNulls: true,
-    dot: props => /*#__PURE__*/React.createElement(SmartDot, _extends({}, props, {
-      color: p.color,
-      pkey: focus
-    })),
-    isAnimationActive: false
-  }))), /*#__PURE__*/React.createElement("div", {
-    style: S.todayNote
-  }, (() => {
-    const isDyn = focus === "fc" && learned && learned.frac != null || focus === "ph" && learned && learned.phK != null;
-    let factor = null;
-    if (focus === "fc") {
-      const pct = fmt(effFrac * 100, 0);
-      factor = isDyn ? `decay factor ${pct}%/day (dynamic, from your readings)` : `decay factor ${pct}%/day (fallback — needs 2+ recent FC readings)`;
-    } else if (focus === "ph") {
-      const k = fmt(effPhK, 2);
-      factor = isDyn ? `drift factor k=${k}/day toward pH ${fmt(effPhEq, 2)} (dynamic, from your readings)` : `drift factor k=${k}/day toward pH ${fmt(effPhEq, 2)} (fallback — needs 2+ recent pH readings)`;
-    }
-    return /*#__PURE__*/React.createElement(React.Fragment, null, measuredPts.length, " measured point", measuredPts.length !== 1 ? "s" : "", " in view \xB7 window: ", config.chartDaysBack === "" ? 21 : config.chartDaysBack, " days back to ", config.chartDaysFwd === "" ? 7 : config.chartDaysFwd, " days ahead", factor ? /*#__PURE__*/React.createElement(React.Fragment, null, " \xB7 ", factor) : null);
-  })())));
+
+  // Effect of a hypothetical dose from the projected-now state.
+  const effectOf = (chem, oz) => {
+    if (!latest) return null;
+    const a = ADDITIVES[chem];
+    const V = Number(config.volume) || 19000;
+    const dFc = a.Cl * oz / V, dTa = a.TA * oz / V, dCh = a.CH * oz / V, dCya = a.CYA * oz / V;
+    const dPh = chem === "Sodium Bicarbonate" ? bicarPHShift(dTa, latest.ta) : a.pH * oz / V;
+    const fc = latest.fc == null ? null : latest.fc + dFc;
+    const ph = latest.ph == null ? null : latest.ph + dPh;
+    const ta = latest.ta == null ? null : latest.ta + dTa;
+    const ch = latest.ch == null ? null : latest.ch + dCh;
+    const cya = latest.cya == null ? null : latest.cya + dCya;
+    const csiNow = csi(ph, ch, ta, cya, curTemp);
+    // one calendar day of pH drift toward equilibrium, FC one sun-day of decay
+    const ph1 = ph == null ? null : effPhEq - (effPhEq - ph) * Math.exp(-effPhK * 1);
+    const sd1 = sunDays(Date.now(), Date.now() + MS_DAY, config.sunStart, config.sunEnd);
+    const fc1 = fc == null ? null : Math.max(0, fc * Math.pow(1 - effFrac, sd1));
+    const csi1 = csi(ph1, ch, ta, cya, curTemp);
+    return { fc, ph, ta, ch, cya, csiNow, ph1, fc1, csi1 };
+  };
+
+  const lastMeasTs = measurements.length ? Math.max(...measurements.map(tsOf)) : null;
+
+  // Splash: shown while loading and for a moment after, then fades out.
+  const [splash, setSplash] = useState({ show: true, out: false });
+  useEffect(() => {
+    if (!loaded) return;
+    const a = setTimeout(() => setSplash({ show: true, out: true }), 1400);
+    const b = setTimeout(() => setSplash({ show: false, out: true }), 1900);
+    return () => { clearTimeout(a); clearTimeout(b); };
+  }, [loaded]);
+  if (!loaded) return h(Splash, { out: false, name: config.name });
+
+  const shared = { config, latest, series, chartSeries, forecast, learned, effFrac, effPhK, effPhEq, effPhEqInfo, plan, effectOf, logDoseNow, curTemp, lastMeasTs, setTab, setFocus, focus };
+
+  return h("div", { className: "app" },
+    h(TopBar, { config, latest, syncStatus, tab }),
+    tab === "home" && h(Home, shared),
+    tab === "trends" && h(Trends, { ...shared, setConfig }),
+    tab === "log" && h(LogTab, { ...shared, measurements, setMeasurements, doses, setDoses }),
+    tab === "advisor" && h(Advisor, { measurements, latest, config, learned, effFrac, plan, effectOf, logDoseNow, curTemp, effPhEq, effPhK }),
+    tab === "settings" && h(Settings, {
+      config, setConfig, learned, effPhEq, effPhEqInfo, syncStatus, exportCSV,
+      latestCya: latest ? latest.cya : null,
+      counts: { m: measurements.length, d: doses.length },
+      onReset: () => { setMeasurements([]); setDoses([]); },
+      onReseed: () => { setMeasurements(SEED.measurements); setDoses(SEED.doses); }
+    }),
+    toast && h("div", { className: "toast", role: "status" },
+      h("span", null, toast.msg),
+      h("button", { type: "button", className: "toast-undo", onClick: () => { toast.undo(); setToast(null); } }, "Undo")
+    ),
+    h(TabBar, { tab, setTab }),
+    splash.show ? h(Splash, { out: splash.out, name: config.name }) : null
+  );
 }
-function SmartDot({
-  cx,
-  cy,
-  payload,
-  color,
-  pkey
-}) {
+
+/* ===================== design tokens ===================== */
+const FONT = "-apple-system,BlinkMacSystemFont,'SF Pro Text',Inter,'Segoe UI',Roboto,Helvetica,Arial,sans-serif";
+const C = {
+  blue: "#1e3a8a", teal: "#06b6d4", coral: "#b45309", green: "#115e59", mint: "#a5f3fc",
+  indigo: "#6d28d9", brown: "#be185d", choc: "#334155", gold: "#f59e0b", red: "#dc2626",
+  g100: "#f1f5f9", g300: "#cbd5e1", g500: "#64748b", ink: "#0f172a", white: "#ffffff"
+};
+const ACID_STEPS = [32, 43, 64];
+const colorOf = key => (PARAMS.find(p => p.key === key) || {}).color || C.ink;
+const numOrDef = (v, d) => v === "" || v == null || isNaN(v) ? d : Number(v);
+const rangeOf = (config, key) => {
+  const def = PARAMS.find(x => x.key === key);
+  return { lo: numOrDef(config[key + "Lo"], def.lo), hi: numOrDef(config[key + "Hi"], def.hi) };
+};
+const fmtDT = t => {
+  const d = new Date(t);
+  return `${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+};
+const fmtMD = t => {
+  const d = new Date(t);
+  return `${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+};
+const fmtVal = (key, v) => key === "csi" ? (v == null ? "—" : (v > 0 ? "+" : "") + fmt(v, 2).replace("-", "−")) : fmt(v, key === "ph" ? 2 : key === "fc" ? 1 : 0);
+const statusOf = (v, lo, hi) => {
+  if (v == null) return { label: "no data", bg: C.g100, fg: C.ink };
+  if (v < lo) return { label: "low", bg: C.red, fg: C.white };
+  if (v > hi) return { label: "high", bg: C.red, fg: C.white };
+  return { label: "in range", bg: C.mint, fg: C.green };
+};
+const daysPhrase = c => c == null ? null : c.days <= 0 ? "now" : c.days === 1 ? "in 1 day" : `in ${c.days} days`;
+
+/* ===================== small pieces ===================== */
+function Chip({ s }) {
+  return h("span", { className: "chip", style: { background: s.bg, color: s.fg } }, s.label);
+}
+function Card({ accent, children, style }) {
+  return h("section", { className: "card", style: { borderTop: accent ? `4px solid ${accent}` : undefined, ...(style || {}) } }, children);
+}
+function CardHead({ title, sub, right }) {
+  return h("div", { className: "card-head" },
+    h("div", null, h("h2", { className: "card-title" }, title), sub ? h("div", { className: "card-sub" }, sub) : null),
+    right || null);
+}
+function Icon({ name, size = 22 }) {
+  const paths = {
+    home: "M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6h-6v6H4a1 1 0 0 1-1-1z",
+    trends: "M3 17l6-6 4 4 8-8M15 7h6v6",
+    log: "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM12 8v8M8 12h8",
+    advisor: "M9 3h6v5l4 9a2 2 0 0 1-2 3H7a2 2 0 0 1-2-3l4-9zM8 14h8",
+    settings: "M4 6h16M4 12h16M4 18h16M9 4v4M15 10v4M7 16v4",
+    trash: "M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3",
+    download: "M12 4v12M6 11l6 6 6-6M4 20h16"
+  };
+  return h("svg", { "aria-hidden": "true", width: size, height: size, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round" },
+    h("path", { d: paths[name] || "" }));
+}
+
+/* ===================== icon + splash ===================== */
+function Mark({ size = 30 }) {
+  return h("svg", { "aria-hidden": "true", className: "mark-svg", width: size, height: size, viewBox: "0 0 1024 1024", style: { display: "block", flex: `0 0 ${size}px` } },
+    h("rect", { width: 1024, height: 1024, fill: C.teal }),
+    h("g", { fill: "none", stroke: C.blue, strokeWidth: 26, opacity: 0.45 }, h("ellipse", { cx: 512, cy: 815, rx: 310, ry: 72 }), h("ellipse", { cx: 512, cy: 815, rx: 175, ry: 41 })),
+    h("path", { d: "M512 110C512 110 300 380 300 530A212 212 0 0 0 724 530C724 380 512 110 512 110Z", fill: "#fff" }),
+    h("path", { d: "M300 575C370 548 430 605 500 578C570 551 640 608 724 575L724 530A212 212 0 0 1 300 530Z", fill: C.blue }));
+}
+const SPLASH_LINES = [
+  "Clear water starts with one reading.",
+  "Chlorine fades, pH climbs, and you keep showing up. That is the whole trick.",
+  "A measured pool is a happy pool.",
+  "Small doses, steady hands, sparkling water.",
+  "You cannot manage what you do not measure. Good thing you are here.",
+  "The sun collects its chlorine tax every afternoon. Let us look at the bill.",
+  "Balanced water, zero drama.",
+  "Another day, another data point. The model loves you for it.",
+  "Plaster-safe and swimmer-happy. Let us keep it that way.",
+  "Houston heat is no match for a good forecast.",
+  "Test, dose, swim. Repeat as needed.",
+  "Your water is talking. Let us listen.",
+  "Nobody ever regretted checking the pH.",
+  "A jug today keeps the algae away.",
+  "Calm water, calm chemist.",
+  "The best time to test was yesterday. The second best time is now.",
+  "Precision beats guesswork, and you have both the test kit and the model.",
+  "Every reading tightens the forecast.",
+  "Welcome back. The pool missed you.",
+  "Carbonate equilibrium is on your side today. Probably.",
+  "Half-lives, drift constants and a cold drink. Living the dream.",
+  "Keep the free chlorine honest and everything else gets easier.",
+  "Good chemistry is just patience with numbers attached.",
+  "Sparkle is a lagging indicator. Readings are a leading one."
+];
+function Splash({ out, name }) {
+  const [line] = useState(() => SPLASH_LINES[Math.floor(Math.random() * SPLASH_LINES.length)]);
+  const hr = new Date().getHours();
+  const hi = hr < 5 ? "Up late?" : hr < 12 ? "Good morning." : hr < 17 ? "Good afternoon." : "Good evening.";
+  return h("div", { className: "splash" + (out ? " splash-out" : ""), "aria-hidden": out ? "true" : undefined },
+    h(Mark, { size: 96 }),
+    h("div", { className: "splash-name" }, "Equilibrium"),
+    h("div", { className: "splash-by" }, "by SchneiApps"),
+    h("div", { className: "splash-rule" }),
+    h("div", { className: "splash-hi" }, `${hi}${name ? " " + name + " is loading." : ""}`),
+    h("div", { className: "splash-msg" }, line),
+    h("div", { className: "splash-tag" }, "Clear water, honest numbers."));
+}
+
+/* ===================== top bar + tab bar ===================== */
+function TopBar({ config, latest, syncStatus, tab }) {
+  const titles = { home: null, trends: "Trends", log: "Log", advisor: "Advisor", settings: "Settings" };
+  const proj = latest && latest._anchorT && latest._projectedFromHours >= 1
+    ? `projected to ${fmtDT(latest.t)} from ${fmtDT(latest._anchorT)}` : null;
+  const sync = { synced: ["synced", C.green], offline: ["offline, cached", C.red], connecting: ["connecting", C.g500], local: ["local only", C.g500] }[syncStatus] || ["", C.g500];
+  return h("header", { className: "topbar" },
+    h("div", { className: "topbar-left" },
+      h(Mark, { size: 30 }),
+      h("div", null,
+        h("div", { className: "topbar-title" }, titles[tab] || config.name || "My Pool"),
+        h("div", { className: "topbar-sub" }, titles[tab] ? `${config.name || "My Pool"} · ${Number(config.volume || 0).toLocaleString()} gal` : `${Number(config.volume || 0).toLocaleString()} gal${proj ? " · " + proj : ""}`))),
+    h("div", { className: "sync" }, h("span", { className: "dot", style: { background: sync[1] } }), sync[0]));
+}
+function TabBar({ tab, setTab }) {
+  const tabs = [["home", "Home"], ["trends", "Trends"], ["log", "Log"], ["advisor", "Advisor"], ["settings", "Settings"]];
+  return h("nav", { className: "tabbar", "aria-label": "Primary" },
+    h("div", { className: "tabbar-inner" }, tabs.map(([k, l]) => h("button", {
+      key: k, type: "button", onClick: () => { setTab(k); window.scrollTo(0, 0); },
+      className: "tab" + (tab === k ? " tab-active" : ""), "aria-current": tab === k ? "page" : undefined
+    }, h(Icon, { name: k }), l))));
+}
+
+/* ===================== charts ===================== */
+function splitPastFuture(data, key) {
+  // two series so the forecast can be dashed; the anchor point joins them
+  let lastPastIdx = -1;
+  data.forEach((s, i) => { if (!s._future) lastPastIdx = i; });
+  return data.map((s, i) => ({
+    ...s,
+    past: s._future ? null : s[key],
+    fut: s._future || i === lastPastIdx ? s[key] : null
+  }));
+}
+function SmartDot({ cx, cy, payload, color, pkey, big }) {
   if (cx == null || cy == null || payload[pkey] == null) return null;
-  const k = payload._kind; // "meas" | "dose" | "model"
-  if (k === "meas") {
-    return /*#__PURE__*/React.createElement("circle", {
-      cx: cx,
-      cy: cy,
-      r: 4,
-      fill: color,
-      stroke: "#fff",
-      strokeWidth: 1.5
-    });
-  }
+  const k = payload._kind;
+  if (k === "meas") return h("circle", { cx, cy, r: big ? 5 : 3.5, fill: color, stroke: "#fff", strokeWidth: 1.5 });
   if (k === "dose") {
-    // Only show the additive marker if this dose actually moves the focused parameter.
     if (payload._affects && !payload._affects[pkey]) return null;
-    return /*#__PURE__*/React.createElement("circle", {
-      cx: cx,
-      cy: cy,
-      r: 3.5,
-      fill: "#fff",
-      stroke: "#9a9890",
-      strokeWidth: 1.5
-    });
+    return h("circle", { cx, cy, r: big ? 4.5 : 3, fill: "#fff", stroke: C.choc, strokeWidth: 1.5 });
   }
-  // modeled — no marker; the line carries the trend
   return null;
 }
-function ChemTooltip({
-  active,
-  payload,
-  param
-}) {
+function ChemTooltip({ active, payload, param }) {
   if (!active || !payload || !payload.length) return null;
   const d = payload[0].payload;
   const v = d[param.key];
   if (v == null) return null;
-  const dt = new Date(d.t);
-  const when = `${d.date} ${String(dt.getHours()).padStart(2, "0")}:${String(dt.getMinutes()).padStart(2, "0")}`;
-  const tag = d._kind === "meas" ? "measured" : d._kind === "dose" ? "additive applied" : d._future ? "forecast" : "modeled";
-  return /*#__PURE__*/React.createElement("div", {
-    style: S.tip
-  }, /*#__PURE__*/React.createElement("div", {
-    style: S.tipDate
-  }, when), /*#__PURE__*/React.createElement("div", {
-    style: {
-      ...S.tipVal,
-      color: param.color
-    }
-  }, fmt(v, param.key === "ph" || param.key === "csi" ? 2 : 1), " ", param.unit), /*#__PURE__*/React.createElement("div", {
-    style: S.tipTag
-  }, tag));
+  const tag = d._kind === "meas" ? "measured" : d._kind === "dose" ? `additive: ${d._chem || ""}` : d._future ? "forecast" : "modeled";
+  return h("div", { className: "tip" },
+    h("div", { className: "tip-date" }, fmtDT(d.t)),
+    h("div", { className: "tip-val", style: { color: param.color } }, fmtVal(param.key, v), " ", param.unit),
+    h("div", { className: "tip-tag" }, tag));
 }
-function LogTab({
-  measurements,
-  setMeasurements,
-  doses,
-  setDoses,
-  config,
-  latest
-}) {
-  const [mForm, setMForm] = useState({
-    ts: nowLocalDT(),
-    fc: "",
-    ph: "",
-    cya: "",
-    ta: "",
-    ch: "",
-    temp: ""
-  });
-  const [dForm, setDForm] = useState({
-    ts: nowLocalDT(),
-    chem: "NaOCl (10.5 wt%)",
-    oz: ""
-  });
+function MiniChart({ series, pkey, color, lo, hi, threshold, daysBack = 7, daysFwd = 3 }) {
+  const now = Date.now();
+  const data = useMemo(() => splitPastFuture(series.filter(s => s.t >= now - daysBack * MS_DAY && s.t <= now + daysFwd * MS_DAY && s[pkey] != null), pkey), [series, pkey, daysBack, daysFwd]);
+  if (data.length < 2) return h("div", { className: "mini-empty" }, "Not enough recent data to draw a trend.");
+  return h("div", { className: "mini" },
+    h(ResponsiveContainer, { width: "100%", height: 72 },
+      h(LineChart, { data, margin: { top: 4, right: 4, bottom: 4, left: 4 } },
+        h(XAxis, { dataKey: "t", type: "number", domain: ["dataMin", "dataMax"], hide: true }),
+        h(YAxis, { domain: ["auto", "auto"], hide: true }),
+        h(ReferenceArea, { y1: lo, y2: hi, fill: C.mint, fillOpacity: 0.35 }),
+        threshold != null ? h(ReferenceLine, { y: threshold, stroke: C.red, strokeDasharray: "3 3" }) : null,
+        h(ReferenceLine, { x: now, stroke: C.g500, strokeDasharray: "2 3" }),
+        h(Line, { type: "monotone", dataKey: "past", stroke: color, strokeWidth: 2, connectNulls: false, isAnimationActive: false, dot: p => h(SmartDot, { ...p, color, pkey }) }),
+        h(Line, { type: "monotone", dataKey: "fut", stroke: color, strokeWidth: 2, strokeDasharray: "4 3", connectNulls: false, isAnimationActive: false, dot: false }))),
+    h("div", { className: "mini-axis" }, h("span", null, `${daysBack} days ago`), h("span", null, "today"), h("span", null, `+${daysFwd} d`)));
+}
+
+/* ===================== dose action box ===================== */
+function DoseBox({ title, chem, oz, steps, step, onChange, lines, note, onLog, hint }) {
+  const unit = ADDITIVES[chem].unit;
+  let dec, inc;
+  if (steps) {
+    const i = steps.indexOf(oz);
+    dec = i > 0 ? () => onChange(steps[i - 1]) : null;
+    inc = i >= 0 && i < steps.length - 1 ? () => onChange(steps[i + 1]) : null;
+  } else {
+    dec = oz > step ? () => onChange(oz - step) : null;
+    inc = () => onChange(oz + step);
+  }
+  const jugs = !steps && step ? Math.round(oz / step) : null;
+  return h("div", { className: "dosebox" },
+    h("div", null,
+      h("div", { className: "dose-k" }, title),
+      h("div", { className: "dose-amt" }, jugs != null ? `${jugs} jug${jugs === 1 ? "" : "s"} · ${oz} ${unit}` : `${oz} ${unit}`),
+      lines.map((l, i) => h("div", { key: i, className: "dose-line" }, l))),
+    h("div", { className: "dose-row" },
+      h("div", { className: "stepper", role: "group", "aria-label": `Amount of ${chem}` },
+        h("button", { type: "button", "aria-label": "Less", disabled: !dec, onClick: dec || undefined }, "−"),
+        h("span", null, `${oz} ${unit}`),
+        h("button", { type: "button", "aria-label": "More", disabled: !inc, onClick: inc || undefined }, "+")),
+      h("button", { type: "button", className: "btn-primary", onClick: onLog }, "Added, log it")),
+    h("div", { className: "dose-note" }, note));
+}
+
+/* ===================== HOME ===================== */
+function Home({ config, latest, series, forecast, learned, effFrac, effPhK, effPhEq, effPhEqInfo, plan, effectOf, logDoseNow, curTemp, lastMeasTs, setTab, setFocus }) {
+  const fcR = rangeOf(config, "fc"), phR = rangeOf(config, "ph"), csiR = rangeOf(config, "csi");
+  const [clOz, setClOz] = useState(plan.cl ? plan.cl.defaultOz : 64);
+  const [acidOz, setAcidOz] = useState(plan.acid ? plan.acid.defaultOz : 43);
+  useEffect(() => { if (plan.cl) setClOz(plan.cl.defaultOz); }, [plan.cl && plan.cl.defaultOz]);
+  useEffect(() => { if (plan.acid) setAcidOz(plan.acid.defaultOz); }, [plan.acid && plan.acid.defaultOz]);
+
+  if (!latest) return h("div", { className: "page" },
+    h(Card, null, h(CardHead, { title: "No readings yet" }), h("p", { className: "p" }, "Log a measurement to start the model."),
+      h("button", { type: "button", className: "btn-primary", onClick: () => setTab("log") }, "Log a reading")));
+
+  // trend words from the model one day out
+  const dayOut = series.find(s => s.t >= latest.t + MS_DAY * 0.9 && s._future) || null;
+  const trend = (key, up, down) => {
+    if (!dayOut || dayOut[key] == null || latest[key] == null) return "";
+    const d = dayOut[key] - latest[key];
+    const eps = key === "ph" ? 0.03 : 0.2;
+    return d > eps ? up : d < -eps ? down : "steady";
+  };
+
+  // reminder
+  const reminder = (() => {
+    if (lastMeasTs == null) return null;
+    const ds = (Date.now() - lastMeasTs) / MS_DAY;
+    if (ds < 3) return null;
+    const urgent = ds >= 5;
+    return h("div", { className: "banner" },
+      h("span", { className: "sq", style: { background: urgent ? C.red : C.gold } }),
+      h("span", null, urgent ? `${Math.floor(ds)} days since your last reading. The forecast is getting stale; log one today.` : `Last reading ${Math.floor(ds)} days ago. Log one to keep the forecast tight.`));
+  })();
+
+  const fcS = statusOf(latest.fc, fcR.lo, fcR.hi);
+  const phS = statusOf(latest.ph, phR.lo, phR.hi);
+  const fcTrend = trend("fc", "rising", "falling"), phTrend = trend("ph", "rising", "falling");
+  const fcChip = { ...fcS, label: fcS.label + (fcTrend ? " · " + fcTrend : "") };
+  const phChip = { ...phS, label: phS.label + (phTrend ? " · " + phTrend : "") };
+
+  // loss headline
+  const loss = learned && learned.totalLoss != null ? `losing ${fmt(learned.totalLoss)} ppm/day` : `fallback ${fmt(effFrac * 100, 0)}%/day`;
+  const halfLife = (() => {
+    if (!learned || learned.frac == null) return null;
+    const W = Number(config.sunEnd) - Number(config.sunStart);
+    if (!(W > 0 && W < 24)) return null;
+    const f = Math.max(0, Math.min(0.95, learned.frac));
+    if (f <= 0) return null;
+    const hl = Math.log(2) / (-Math.log(1 - f) / W);
+    return isFinite(hl) ? (hl < 10 ? hl.toFixed(1) : Math.round(hl)) : null;
+  })();
+
+  // pH floor for the subtitle
+  const phFloor = latest.ta != null && latest.ch != null && latest.cya != null ? phForCSI(csiR.lo, latest.ch, latest.ta, latest.cya, curTemp) : null;
+
+  const clEff = plan.cl ? effectOf(plan.cl.chem, clOz) : null;
+  const acEff = plan.acid ? effectOf(plan.acid.chem, acidOz) : null;
+
+  // CSI
+  const csiWord = c => c == null ? "need all five inputs" : c <= -0.6 ? "corrosive" : c <= -0.3 ? "slightly corrosive" : c < 0.3 ? "balanced" : c < 0.6 ? "slightly scaling" : "scaling";
+  const csiChip = latest.csi == null ? { label: "no data", bg: C.g100, fg: C.ink }
+    : latest.csi >= csiR.lo && latest.csi <= csiR.hi ? { label: "balanced", bg: C.mint, fg: C.green }
+    : Math.abs(latest.csi) < 0.6 ? { label: csiWord(latest.csi), bg: C.gold, fg: C.ink }
+    : { label: csiWord(latest.csi), bg: C.red, fg: C.white };
+  const csiPos = latest.csi == null ? null : Math.max(2, Math.min(98, (latest.csi + 0.75) / 1.5 * 100));
+
+  const fcBelow = forecast && forecast.fcBelow1, phAbove = forecast && forecast.phAbove;
+
+  return h("div", { className: "page" },
+    reminder,
+
+    // 1. chlorine
+    h(Card, { accent: colorOf("fc") },
+      h(CardHead, { title: "Free chlorine", sub: `target ${fcR.lo}–${fcR.hi} ppm`, right: h(Chip, { s: fcChip }) }),
+      h("div", { className: "hero-row" },
+        h("div", { className: "hero-val" }, h("span", { style: { color: colorOf("fc") } }, fmtVal("fc", latest.fc)), h("span", { className: "unit" }, "ppm")),
+        h("div", { className: "hero-side" },
+          h("span", null, fcBelow ? h(React.Fragment, null, h("b", null, `Below 1 ppm ${daysPhrase(fcBelow)}`), fcBelow.days > 0 ? ` (${fcBelow.date})` : "") : h("b", null, "Stays above 1 ppm through the forecast")),
+          h("span", null, loss, halfLife ? ` · t½ ≈ ${halfLife} h` : ""))),
+      h(MiniChart, { series, pkey: "fc", color: colorOf("fc"), lo: fcR.lo, hi: fcR.hi, threshold: 1 }),
+      plan.cl && clEff ? h(DoseBox, {
+        title: `Add today · ${plan.cl.chem}`, chem: plan.cl.chem, oz: clOz, step: plan.cl.step, onChange: setClOz,
+        lines: [`${fmt(latest.fc)} → ${fmt(clEff.fc)} ppm now; about ${fmt(clEff.fc1)} ppm this time tomorrow.`,
+          plan.cl.crossing.days > 0 ? `Without it FC crosses ${fcR.lo} ppm ${daysPhrase(plan.cl.crossing)}.` : `FC is already below ${fcR.lo} ppm.`],
+        note: `Whole jugs only; overshoot is fine. Writes the dose at the current time on tap. Undo from the banner or Log.`,
+        onLog: () => logDoseNow(plan.cl.chem, clOz)
+      }) : h("div", { className: "allgood" }, `No chlorine called for: FC stays above ${fcR.lo} ppm through the ${config.chartDaysFwd || 7}-day forecast.`)),
+
+    // 2. pH
+    h(Card, { accent: colorOf("ph") },
+      h(CardHead, { title: "pH", sub: `target ${phR.lo}–${phR.hi}${phFloor != null ? ` · floor ${fmt(phFloor, 2)} (CSI)` : ""}`, right: h(Chip, { s: phChip }) }),
+      h("div", { className: "hero-row" },
+        h("div", { className: "hero-val" }, h("span", { style: { color: colorOf("ph") } }, fmtVal("ph", latest.ph))),
+        h("div", { className: "hero-side" },
+          h("span", null, phAbove ? h(React.Fragment, null, h("b", null, `Above ${forecast.phLimit} ${daysPhrase(phAbove)}`), phAbove.days > 0 ? ` (${phAbove.date})` : "") : h("b", null, `Stays at or below ${forecast ? forecast.phLimit : 7.9}`)),
+          h("span", null, `drifting toward ${fmt(effPhEq, 2)} · k = ${fmt(effPhK, 2)}/day`))),
+      h(MiniChart, { series, pkey: "ph", color: colorOf("ph"), lo: phR.lo, hi: phR.hi, threshold: forecast ? forecast.phLimit : 7.9 }),
+      plan.acid && acEff ? h(DoseBox, {
+        title: `Add today · ${plan.acid.chem}`, chem: plan.acid.chem, oz: acidOz, steps: plan.acid.steps, onChange: setAcidOz,
+        lines: [`pH ${fmt(latest.ph, 2)} → ${fmt(acEff.ph, 2)}${acEff.ta != null ? ` · TA ${fmt(latest.ta, 0)} → ${fmt(acEff.ta, 0)}` : ""}${acEff.csiNow != null ? ` · CSI ${fmtVal("csi", latest.csi)} → ${fmtVal("csi", acEff.csiNow)}` : ""} at dosing.`,
+          `Then drift brings pH to ${fmt(acEff.ph1, 2)} by this time tomorrow${acEff.csi1 != null ? ` (CSI ${fmtVal("csi", acEff.csi1)})` : ""}.`,
+          phFloor != null && acEff.ph != null && acEff.ph < phFloor ? `Lands ${fmt(phFloor - acEff.ph, 2)} under the CSI floor briefly.` : null].filter(Boolean),
+        note: `Shown only while pH is above ${phR.hi}. Steps ${ACID_STEPS.join(" · ")} fl oz; ${ACID_STEPS[ACID_STEPS.length - 1]} is the cap per dose. Writes on tap.`,
+        onLog: () => logDoseNow(plan.acid.chem, acidOz)
+      }) : h("div", { className: "allgood" }, latest.ph == null ? "No pH reading yet." : `No acid called for while pH is at or below ${phR.hi}.`)),
+
+    // 3. CSI
+    h(Card, { accent: colorOf("csi") },
+      h(CardHead, { title: "Water balance (CSI)", sub: `target ${fmtVal("csi", csiR.lo)} to ${fmtVal("csi", csiR.hi)} · at ${fmt(curTemp, 0)} °F`, right: h(Chip, { s: csiChip }) }),
+      h("div", { className: "hero-row", style: { alignItems: "baseline" } },
+        h("div", { className: "hero-val mid" }, h("span", { style: { color: colorOf("csi") } }, fmtVal("csi", latest.csi))),
+        h("div", { className: "hero-side", style: { textAlign: "left", alignItems: "flex-start" } },
+          h("span", null, latest.csi == null ? "Need FC-independent inputs: pH, TA, CH, CYA and a temperature."
+            : plan.acid && acEff && acEff.csiNow != null ? `Driven by pH; ${acidOz} fl oz of acid takes it to ${fmtVal("csi", acEff.csiNow)}, back to ${fmtVal("csi", acEff.csi1)} within a day.`
+            : latest.csi > csiR.hi ? "Scale-forming: lower pH or alkalinity." : latest.csi < csiR.lo ? "Corrosive: raise pH, alkalinity or calcium." : "Plaster is neither dissolving nor scaling."))),
+      h("div", { className: "gauge" },
+        h("div", { style: { background: C.red } }), h("div", { style: { background: C.gold } }), h("div", { style: { background: C.mint } }), h("div", { style: { background: C.gold } }), h("div", { style: { background: C.red } }),
+        csiPos != null ? h("div", { className: "gauge-pin", style: { left: `${csiPos}%` } }) : null),
+      h("div", { className: "gauge-axis" }, h("span", null, "−0.6"), h("span", null, "−0.3"), h("span", null, "0"), h("span", null, "+0.3"), h("span", null, "+0.6"))),
+
+    // 4. long-term
+    h("section", { className: "lt" },
+      h("div", { className: "lt-head" }, h("h2", { className: "card-title" }, "Long-term"), h("span", null, "carry forward between tests · re-test monthly")),
+      h("div", { className: "lt-grid" }, ["cya", "ta", "ch"].map(k => {
+        const r = rangeOf(config, k), v = latest[k], s = statusOf(v, r.lo, r.hi);
+        const p = PARAMS.find(x => x.key === k);
+        return h("button", { key: k, type: "button", className: "lt-card", onClick: () => { setFocus(k); setTab("trends"); } },
+          h("span", { className: "lt-k" }, k === "cya" ? "CYA" : k === "ta" ? "Alkalinity" : "Calcium"),
+          h("span", { className: "lt-v" }, h("span", { style: { color: p.color } }, fmtVal(k, v)), h("span", { className: "unit" }, "ppm")),
+          h("span", { className: "lt-s" }, `${r.lo}–${r.hi} · ${s.label === "in range" ? "ok" : s.label}`));
+      }))),
+
+    h("div", { className: "foot" },
+      `FC decay ${learned && learned.frac != null ? `${fmt(learned.frac * 100, 0)}%/day learned from your last ${learned.win} days` : `fallback ${fmt(effFrac * 100, 0)}%/day (need 2+ recent FC readings)`}. pH drift ${learned && learned.phK != null ? `k=${fmt(learned.phK, 2)}/day learned` : `fallback k=${fmt(effPhK, 2)}/day`} toward ${fmt(effPhEq, 2)} (${effPhEqInfo.source}). CSI uses the TroubleFreePool formula with the pH-dependent CYA correction.`));
+}
+
+/* ===================== TRENDS ===================== */
+function Trends({ config, setConfig, chartSeries, series, focus, setFocus, latest, learned, effFrac, effPhK, effPhEq }) {
+  const p = PARAMS.find(x => x.key === focus);
+  const r = rangeOf(config, focus);
+  const [pinned, setPinned] = useState(null);
+  const data = useMemo(() => splitPastFuture(chartSeries, focus), [chartSeries, focus]);
+  const measuredPts = chartSeries.filter(s => s._meas && s._meas[focus]);
+  const back = numOrDef(config.chartDaysBack, 21);
+  const setBack = d => setConfig({ ...config, chartDaysBack: d });
+  const threshold = focus === "fc" ? 1 : focus === "ph" ? 7.9 : null;
+  const chip = (k, big) => {
+    const pp = PARAMS.find(x => x.key === k), v = latest ? latest[k] : null;
+    return h("button", { key: k, type: "button", onClick: () => setFocus(k), "aria-pressed": focus === k,
+      className: (big ? "pchip" : "pchip pchip-sm") + (focus === k ? " pchip-on" : ""), style: focus === k ? { borderColor: pp.color } : undefined },
+      h("span", { className: "pchip-k" }, k === "fc" ? "Free Cl" : k === "ph" ? "pH" : k === "csi" ? "CSI" : k === "cya" ? "CYA" : k === "ta" ? "TA" : "CH"),
+      h("span", { className: "pchip-v", style: { color: pp.color } }, fmtVal(k, v)));
+  };
+  const seg = (vals, cur, on) => h("div", { className: "seg", role: "group" }, vals.map(v => h("button", { key: v, type: "button", "aria-pressed": cur === v, className: cur === v ? "seg-on" : "", onClick: () => on(v) }, `${v}d`)));
+  const footer = (() => {
+    const isDyn = focus === "fc" && learned && learned.frac != null || focus === "ph" && learned && learned.phK != null;
+    let f = "";
+    if (focus === "fc") f = ` · decay ${fmt(effFrac * 100, 0)}%/day ${isDyn ? "(dynamic, from your readings)" : "(fallback; needs 2+ recent FC readings)"}`;
+    if (focus === "ph") f = ` · drift k=${fmt(effPhK, 2)}/day toward ${fmt(effPhEq, 2)} ${isDyn ? "(dynamic)" : "(fallback)"}`;
+    return `${measuredPts.length} measured point${measuredPts.length === 1 ? "" : "s"} in view · ${back} days back, ${numOrDef(config.chartDaysFwd, 7)} forward${f}`;
+  })();
+  return h("div", { className: "page" },
+    h("div", { className: "row-between" }, h("div", { className: "pchips" }, ["fc", "ph", "csi"].map(k => chip(k, true))), null),
+    h("div", { className: "pchips" }, ["cya", "ta", "ch"].map(k => chip(k, false))),
+    h(Card, null,
+      h("div", { className: "card-head" },
+        h("div", null, h("h2", { className: "card-title", style: { color: p.color } }, p.label), h("div", { className: "card-sub" }, `${p.unit || ""}${p.unit ? " · " : ""}target ${focus === "csi" ? fmtVal("csi", r.lo) + " to " + fmtVal("csi", r.hi) : r.lo + "–" + r.hi}`)),
+        seg([7, 21, 60], back, setBack)),
+      data.length ? h(ResponsiveContainer, { width: "100%", height: 300 },
+        h(LineChart, { data, margin: { top: 8, right: 8, bottom: 4, left: -16 }, onClick: e => { if (e && e.activePayload && e.activePayload.length) setPinned(e.activePayload[0].payload); } },
+          h(CartesianGrid, { stroke: C.g300, vertical: false }),
+          h(XAxis, { dataKey: "t", type: "number", scale: "time", domain: ["dataMin", "dataMax"], tick: { fontSize: 11, fill: C.ink }, tickFormatter: fmtMD, minTickGap: 40 }),
+          h(YAxis, { tick: { fontSize: 11, fill: C.ink }, domain: ["auto", "auto"], width: 48 }),
+          h(Tooltip, { content: h(ChemTooltip, { param: p }) }),
+          h(ReferenceArea, { y1: r.lo, y2: r.hi, fill: C.mint, fillOpacity: 0.35 }),
+          threshold != null ? h(ReferenceLine, { y: threshold, stroke: C.red, strokeDasharray: "4 4" }) : null,
+          h(ReferenceLine, { x: Date.now(), stroke: C.g500, strokeDasharray: "3 3" }),
+          h(Line, { type: "monotone", dataKey: "past", stroke: p.color, strokeWidth: 2.5, connectNulls: false, isAnimationActive: false, dot: props => h(SmartDot, { ...props, color: p.color, pkey: focus, big: true }) }),
+          h(Line, { type: "monotone", dataKey: "fut", stroke: p.color, strokeWidth: 2.5, strokeDasharray: "7 5", connectNulls: false, isAnimationActive: false, dot: false })))
+        : h("p", { className: "p" }, "No data in this window."),
+      h("div", { className: "legend" },
+        h("span", null, h("i", { className: "lg-dot", style: { background: p.color } }), "measured"),
+        h("span", null, h("i", { className: "lg-dot lg-hollow" }), "additive"),
+        h("span", null, h("i", { className: "lg-dash", style: { borderColor: p.color } }), "forecast"),
+        h("span", null, h("i", { className: "lg-band" }), "target"),
+        threshold != null ? h("span", null, h("i", { className: "lg-dash", style: { borderColor: C.red } }), focus === "fc" ? "1 ppm floor" : "7.9 ceiling") : null),
+      h("div", { className: "note" }, footer)),
+    h(Card, null,
+      h(CardHead, { title: "Selected point", sub: pinned ? `${fmtDT(pinned.t)} · ${pinned._kind === "meas" ? "measured" : pinned._kind === "dose" ? "additive" : pinned._future ? "forecast" : "modeled"}` : "tap a point on the chart to pin it here",
+        right: pinned ? h("button", { type: "button", className: "btn-ghost sm", onClick: () => setPinned(null) }, "Clear") : null }),
+      pinned ? h("div", { className: "pt-grid" }, PARAMS.map(pp => h("div", { key: pp.key }, h("span", null, pp.key === "fc" ? "FC" : pp.key === "ph" ? "pH" : pp.key === "csi" ? "CSI" : pp.key.toUpperCase()), h("b", { style: { color: pp.color } }, fmtVal(pp.key, pinned[pp.key]))))) : null),
+    h("div", { className: "foot" }, "Measured points re-anchor the model. Additive markers show only on parameters that additive moves. Same-timestamp order: dose, then measurement."));
+}
+
+/* ===================== LOG ===================== */
+function LogTab({ measurements, setMeasurements, doses, setDoses, config, latest, plan, effectOf, logDoseNow, setTab }) {
+  const [mode, setMode] = useState("meas");
+  const [showAll, setShowAll] = useState(false);
+  const [mForm, setMForm] = useState({ ts: nowLocalDT(), fc: "", ph: "", cya: "", ta: "", ch: "", temp: "" });
+  const [dForm, setDForm] = useState({ ts: nowLocalDT(), chem: "NaOCl (10.5 wt%)", oz: "" });
+  const lastWith = k => { const ms = measurements.filter(m => m[k] != null && m[k] !== "").sort((a, b) => tsOf(b) - tsOf(a)); return ms[0] || null; };
+  const ago = e => { if (!e) return "no reading yet"; const d = (Date.now() - tsOf(e)) / MS_DAY; return d < 1 ? "today" : d < 2 ? "yesterday" : `${Math.floor(d)} days ago`; };
   const addMeas = () => {
-    const row = {
-      ts: mForm.ts
-    };
-    ["fc", "ph", "cya", "ta", "ch", "temp"].forEach(k => {
-      if (mForm[k] !== "") row[k] = Number(mForm[k]);
-    });
-    // dedup only on identical timestamp (lets multiple readings per day coexist)
+    const row = { ts: mForm.ts };
+    let any = false;
+    ["fc", "ph", "cya", "ta", "ch", "temp"].forEach(k => { if (mForm[k] !== "") { row[k] = Number(mForm[k]); any = true; } });
+    if (!any) return;
     setMeasurements(prev => [...prev.filter(m => (m.ts || m.date) !== row.ts), row]);
-    setMForm({
-      ts: nowLocalDT(),
-      fc: "",
-      ph: "",
-      cya: "",
-      ta: "",
-      ch: "",
-      temp: ""
-    });
+    setMForm({ ts: nowLocalDT(), fc: "", ph: "", cya: "", ta: "", ch: "", temp: "" });
+    setTab("home");
   };
   const addDose = () => {
     if (dForm.oz === "") return;
-    setDoses(prev => [...prev, {
-      ts: dForm.ts,
-      chem: dForm.chem,
-      oz: Number(dForm.oz)
-    }]);
-    setDForm({
-      ts: nowLocalDT(),
-      chem: dForm.chem,
-      oz: ""
-    });
+    setDoses(prev => [...prev, { ts: dForm.ts, chem: dForm.chem, oz: Number(dForm.oz) }]);
+    setDForm({ ts: nowLocalDT(), chem: dForm.chem, oz: "" });
+    setTab("home");
   };
   const preview = useMemo(() => {
-    const a = ADDITIVES[dForm.chem];
-    const oz = Number(dForm.oz) || 0;
+    const a = ADDITIVES[dForm.chem]; const oz = Number(dForm.oz) || 0;
     if (!a || !oz) return null;
     const dTA = a.TA * oz / config.volume;
-    // Sodium bicarbonate pH: Henderson-Hasselbalch buffer; all others: linear coefficient
     const dPH = dForm.chem === "Sodium Bicarbonate" ? bicarPHShift(dTA, latest && latest.ta > 0 ? latest.ta : 80) : a.pH * oz / config.volume;
-    return {
-      fc: a.Cl * oz / config.volume,
-      cya: a.CYA * oz / config.volume,
-      ta: dTA,
-      ph: dPH,
-      ch: a.CH * oz / config.volume
-    };
+    return { fc: a.Cl * oz / config.volume, cya: a.CYA * oz / config.volume, ta: dTA, ph: dPH, ch: a.CH * oz / config.volume };
   }, [dForm, config.volume, latest]);
-  const showWhen = e => {
-    const t = tsOf(e);
-    if (isNaN(t)) return e.date || "";
-    const x = new Date(t);
-    return `${toLocalISO(x)} ${String(x.getHours()).padStart(2, "0")}:${String(x.getMinutes()).padStart(2, "0")}`;
-  };
-  return /*#__PURE__*/React.createElement("div", {
-    className: "two-col",
-    style: S.logGrid
-  }, /*#__PURE__*/React.createElement("div", {
-    style: S.logCol
-  }, /*#__PURE__*/React.createElement("h3", {
-    style: S.logH
-  }, "Log a measurement"), /*#__PURE__*/React.createElement("p", {
-    style: S.logHint
-  }, "Enter whatever you tested \u2014 blanks are fine. Date & time default to now; adjust if you're logging an earlier reading. Time is used for accurate chlorine-loss math."), /*#__PURE__*/React.createElement("div", {
-    style: S.field
-  }, /*#__PURE__*/React.createElement("label", {
-    style: S.lab
-  }, "Date & time"), /*#__PURE__*/React.createElement("input", {
-    type: "datetime-local",
-    value: mForm.ts,
-    onChange: e => setMForm({
-      ...mForm,
-      ts: e.target.value
-    }),
-    style: S.input
-  })), /*#__PURE__*/React.createElement("div", {
-    style: S.fieldRow
-  }, [["fc", "Free Cl"], ["ph", "pH"], ["cya", "CYA"]].map(([k, l]) => /*#__PURE__*/React.createElement("div", {
-    key: k,
-    style: S.field
-  }, /*#__PURE__*/React.createElement("label", {
-    style: S.lab
-  }, l), /*#__PURE__*/React.createElement("input", {
-    type: "number",
-    step: "any",
-    value: mForm[k],
-    onChange: e => setMForm({
-      ...mForm,
-      [k]: e.target.value
-    }),
-    style: S.input
-  })))), /*#__PURE__*/React.createElement("div", {
-    style: S.fieldRow
-  }, [["ta", "Alkalinity"], ["ch", "Calcium"], ["temp", "Temp °F"]].map(([k, l]) => /*#__PURE__*/React.createElement("div", {
-    key: k,
-    style: S.field
-  }, /*#__PURE__*/React.createElement("label", {
-    style: S.lab
-  }, l), /*#__PURE__*/React.createElement("input", {
-    type: "number",
-    step: "any",
-    value: mForm[k],
-    onChange: e => setMForm({
-      ...mForm,
-      [k]: e.target.value
-    }),
-    style: S.input
-  })))), /*#__PURE__*/React.createElement("button", {
-    onClick: addMeas,
-    style: S.btnPrimary
-  }, "Save measurement"), /*#__PURE__*/React.createElement("h4", {
-    style: S.subH
-  }, "History (", measurements.length, ")"), /*#__PURE__*/React.createElement("div", {
-    style: S.histList
-  }, [...measurements].sort((a, b) => tsOf(b) - tsOf(a)).map((m, i) => /*#__PURE__*/React.createElement("div", {
-    key: i,
-    style: S.histRow
-  }, /*#__PURE__*/React.createElement("span", {
-    style: S.histDate
-  }, showWhen(m)), /*#__PURE__*/React.createElement("span", {
-    style: S.histVals
-  }, m.fc != null && `Cl ${m.fc} `, m.ph != null && `pH ${m.ph} `, m.cya != null && `CYA ${m.cya} `, m.ta != null && `TA ${m.ta} `, m.ch != null && `CH ${m.ch}`), /*#__PURE__*/React.createElement("button", {
-    onClick: () => setMeasurements(measurements.filter(x => x !== m)),
-    style: S.del
-  }, "\xD7"))))), /*#__PURE__*/React.createElement("div", {
-    style: S.logCol
-  }, /*#__PURE__*/React.createElement("h3", {
-    style: S.logH
-  }, "Log an additive"), /*#__PURE__*/React.createElement("p", {
-    style: S.logHint
-  }, "Pick the chemical and amount; the app applies your spreadsheet's coefficients to every affected parameter."), /*#__PURE__*/React.createElement("div", {
-    style: S.field
-  }, /*#__PURE__*/React.createElement("label", {
-    style: S.lab
-  }, "Date & time"), /*#__PURE__*/React.createElement("input", {
-    type: "datetime-local",
-    value: dForm.ts,
-    onChange: e => setDForm({
-      ...dForm,
-      ts: e.target.value
-    }),
-    style: S.input
-  })), /*#__PURE__*/React.createElement("div", {
-    style: S.field
-  }, /*#__PURE__*/React.createElement("label", {
-    style: S.lab
-  }, "Chemical"), /*#__PURE__*/React.createElement("select", {
-    value: dForm.chem,
-    onChange: e => setDForm({
-      ...dForm,
-      chem: e.target.value
-    }),
-    style: S.input
-  }, Object.keys(ADDITIVES).map(c => /*#__PURE__*/React.createElement("option", {
-    key: c
-  }, c)))), /*#__PURE__*/React.createElement("div", {
-    style: S.field
-  }, /*#__PURE__*/React.createElement("label", {
-    style: S.lab
-  }, "Amount (", ADDITIVES[dForm.chem]?.unit, ")"), /*#__PURE__*/React.createElement("input", {
-    type: "number",
-    step: "any",
-    value: dForm.oz,
-    onChange: e => setDForm({
-      ...dForm,
-      oz: e.target.value
-    }),
-    style: S.input
-  })), preview && /*#__PURE__*/React.createElement("div", {
-    style: S.preview
-  }, /*#__PURE__*/React.createElement("div", {
-    style: S.previewT
-  }, "This dose will change:"), /*#__PURE__*/React.createElement("div", {
-    style: S.previewGrid
-  }, [["FC", preview.fc, "ppm"], ["CYA", preview.cya, "ppm"], ["pH", preview.ph, ""], ["Alk", preview.ta, "ppm"], ["Calcium", preview.ch, "ppm"]].filter(([, v]) => Math.abs(v) > 0.001).map(([l, v, u]) => /*#__PURE__*/React.createElement("span", {
-    key: l,
-    style: S.previewChip
-  }, l, " ", v > 0 ? "+" : "", fmt(v, l === "pH" ? 2 : 1), " ", u)))), /*#__PURE__*/React.createElement("button", {
-    onClick: addDose,
-    style: S.btnPrimary
-  }, "Save additive"), /*#__PURE__*/React.createElement("h4", {
-    style: S.subH
-  }, "History (", doses.length, ")"), /*#__PURE__*/React.createElement("div", {
-    style: S.histList
-  }, [...doses].sort((a, b) => tsOf(b) - tsOf(a)).map((d, i) => /*#__PURE__*/React.createElement("div", {
-    key: i,
-    style: S.histRow
-  }, /*#__PURE__*/React.createElement("span", {
-    style: S.histDate
-  }, showWhen(d)), /*#__PURE__*/React.createElement("span", {
-    style: S.histVals
-  }, d.oz, " ", ADDITIVES[d.chem]?.unit, " \xB7 ", d.chem), /*#__PURE__*/React.createElement("button", {
-    onClick: () => setDoses(doses.filter(x => x !== d)),
-    style: S.del
-  }, "\xD7"))))));
+  const field = (id, label, k, form, setForm, extra) => h("div", { className: "field" },
+    h("label", { htmlFor: id, style: extra && extra.color ? { color: extra.color, fontWeight: 700 } : undefined }, label),
+    h("input", { id, type: "number", step: "any", inputMode: "decimal", value: form[k], placeholder: extra && extra.ph, onChange: e => setForm({ ...form, [k]: e.target.value }) }));
+  const signed = (v, d) => v == null || Math.abs(v) < 0.0005 ? "0" : (v > 0 ? "+" : "−") + fmt(Math.abs(v), d);
+  const entries = useMemo(() => {
+    const all = [...measurements.map(m => ({ kind: "meas", t: tsOf(m), e: m })), ...doses.map(d => ({ kind: "dose", t: tsOf(d), e: d }))].sort((a, b) => b.t - a.t);
+    return showAll ? all : all.slice(0, 8);
+  }, [measurements, doses, showAll]);
+  const clEff = plan.cl ? effectOf(plan.cl.chem, plan.cl.defaultOz) : null;
+  const acEff = plan.acid ? effectOf(plan.acid.chem, plan.acid.defaultOz) : null;
+  return h("div", { className: "page" },
+    h("div", { className: "seg seg-wide", role: "group", "aria-label": "Entry type" },
+      h("button", { type: "button", className: mode === "meas" ? "seg-on" : "", "aria-pressed": mode === "meas", onClick: () => setMode("meas") }, "Measurement"),
+      h("button", { type: "button", className: mode === "dose" ? "seg-on" : "", "aria-pressed": mode === "dose", onClick: () => setMode("dose") }, "Additive")),
+    mode === "meas" ? h(Card, null,
+      h("div", { className: "field" }, h("label", { htmlFor: "m-ts" }, "Date and time"), h("input", { id: "m-ts", type: "datetime-local", value: mForm.ts, onChange: e => setMForm({ ...mForm, ts: e.target.value }) })),
+      h("div", { className: "sect-k" }, "Test every few days"),
+      h("div", { className: "grid2" },
+        h("div", { className: "field big", style: { borderColor: colorOf("fc") } },
+          h("label", { htmlFor: "m-fc", style: { color: colorOf("fc") } }, "Free chlorine"),
+          h("div", { className: "big-in" }, h("input", { id: "m-fc", type: "number", step: "any", inputMode: "decimal", placeholder: "—", value: mForm.fc, onChange: e => setMForm({ ...mForm, fc: e.target.value }) }), h("span", null, "ppm")),
+          h("span", { className: "hint" }, `last ${fmt(lastWith("fc") && lastWith("fc").fc)} · ${ago(lastWith("fc"))}`)),
+        h("div", { className: "field big", style: { borderColor: colorOf("ph") } },
+          h("label", { htmlFor: "m-ph", style: { color: colorOf("ph") } }, "pH"),
+          h("div", { className: "big-in" }, h("input", { id: "m-ph", type: "number", step: "any", inputMode: "decimal", placeholder: "—", value: mForm.ph, onChange: e => setMForm({ ...mForm, ph: e.target.value }) })),
+          h("span", { className: "hint" }, `last ${fmt(lastWith("ph") && lastWith("ph").ph, 2)} · ${ago(lastWith("ph"))}`))),
+      field("m-temp", "Water temp (°F), used in CSI", "temp", mForm, setMForm, { ph: lastWith("temp") ? String(lastWith("temp").temp) : "" }),
+      h("div", { className: "sect-k", style: { borderTop: `1.33px solid ${C.g300}`, paddingTop: 12, marginTop: 4, display: "flex", justifyContent: "space-between" } }, h("span", null, "Test monthly · blanks carry forward"), h("span", { style: { fontWeight: 400 } }, `last full test ${lastWith("cya") ? fmtMD(tsOf(lastWith("cya"))) : "—"}`)),
+      h("div", { className: "grid3" },
+        field("m-cya", "CYA", "cya", mForm, setMForm, { color: colorOf("cya"), ph: lastWith("cya") ? fmt(lastWith("cya").cya, 0) : "" }),
+        field("m-ta", "Alkalinity", "ta", mForm, setMForm, { color: colorOf("ta"), ph: lastWith("ta") ? fmt(lastWith("ta").ta, 0) : "" }),
+        field("m-ch", "Calcium", "ch", mForm, setMForm, { color: colorOf("ch"), ph: lastWith("ch") ? fmt(lastWith("ch").ch, 0) : "" })),
+      h("button", { type: "button", className: "btn-primary tall", onClick: addMeas }, "Save measurement"))
+    : h(Card, null,
+      h("div", { className: "field" }, h("label", { htmlFor: "d-ts" }, "Date and time"), h("input", { id: "d-ts", type: "datetime-local", value: dForm.ts, onChange: e => setDForm({ ...dForm, ts: e.target.value }) })),
+      h("div", { className: "grid2" },
+        h("div", { className: "field" }, h("label", { htmlFor: "d-chem" }, "Chemical"), h("select", { id: "d-chem", value: dForm.chem, onChange: e => setDForm({ ...dForm, chem: e.target.value }) }, Object.keys(ADDITIVES).map(k => h("option", { key: k, value: k }, k)))),
+        h("div", { className: "field" }, h("label", { htmlFor: "d-oz" }, `Amount (${ADDITIVES[dForm.chem].unit})`), h("input", { id: "d-oz", type: "number", step: "any", inputMode: "decimal", value: dForm.oz, onChange: e => setDForm({ ...dForm, oz: e.target.value }) }))),
+      h("div", { className: "preview" },
+        h("div", { className: "sect-k" }, `Expected effect at ${Number(config.volume || 0).toLocaleString()} gal`),
+        preview ? h("div", { className: "grid5" },
+          [["FC", preview.fc, latest && latest.fc, 2, colorOf("fc")], ["pH", preview.ph, latest && latest.ph, 2, colorOf("ph")], ["CYA", preview.cya, latest && latest.cya, 0, colorOf("cya")], ["TA", preview.ta, latest && latest.ta, 0, colorOf("ta")], ["CH", preview.ch, latest && latest.ch, 0, colorOf("ch")]].map(([l, d, cur, dec, col]) =>
+            h("div", { key: l }, h("span", null, l), h("b", { style: { color: Math.abs(d) >= 0.0005 ? col : C.ink } }, signed(d, dec)), cur != null && Math.abs(d) >= 0.0005 ? h("span", null, `→ ${fmt(cur + d, dec)}`) : null)))
+          : h("div", { className: "hint" }, "Enter an amount to preview.")),
+      h("button", { type: "button", className: "btn-primary tall", onClick: addDose }, "Save additive")),
+
+    (plan.cl || plan.acid) ? h("section", { className: "suggest" },
+      h("div", { className: "row-between" }, h("h2", { className: "card-title" }, "Suggested today"), h("span", { className: "hint" }, "container sizes · from Home")),
+      plan.cl && clEff ? h("div", { className: "sug-row" },
+        h("div", null, h("b", null, `${plan.cl.defaultOz} fl oz ${plan.cl.chem}`), h("div", { className: "hint" }, `FC ${fmt(latest.fc)} → ${fmt(clEff.fc)} ppm`)),
+        h("button", { type: "button", className: "btn-ghost", onClick: () => logDoseNow(plan.cl.chem, plan.cl.defaultOz) }, "Log as added")) : null,
+      plan.acid && acEff ? h("div", { className: "sug-row" },
+        h("div", null, h("b", null, `${plan.acid.defaultOz} fl oz ${plan.acid.chem}`), h("div", { className: "hint" }, `pH ${fmt(latest.ph, 2)} → ${fmt(acEff.ph, 2)}${acEff.ta != null ? ` · TA ${fmt(latest.ta, 0)} → ${fmt(acEff.ta, 0)}` : ""}`)),
+        h("button", { type: "button", className: "btn-ghost", onClick: () => logDoseNow(plan.acid.chem, plan.acid.defaultOz) }, "Log as added")) : null) : null,
+
+    h("section", null,
+      h("div", { className: "row-between rule" }, h("h2", { className: "card-title" }, showAll ? "History" : "Recent"), h("span", { className: "hint" }, `${measurements.length} measurements · ${doses.length} additives`)),
+      entries.map((x, i) => h("div", { key: x.kind + x.t + i, className: "hist-row", style: { background: i % 2 ? C.g100 : C.white } },
+        h("div", null,
+          x.kind === "meas"
+            ? h(React.Fragment, null,
+              h("div", { className: "hist-main" }, h("i", { className: "lg-dot", style: { background: colorOf("fc") } }), [x.e.fc != null ? `FC ${fmt(x.e.fc)}` : null, x.e.ph != null ? `pH ${fmt(x.e.ph, 2)}` : null, x.e.temp != null ? `${fmt(x.e.temp, 0)}°` : null].filter(Boolean).join(" · ") || "measurement"),
+              h("div", { className: "hint" }, fmtDT(x.t), [x.e.cya != null ? `CYA ${fmt(x.e.cya, 0)}` : null, x.e.ta != null ? `TA ${fmt(x.e.ta, 0)}` : null, x.e.ch != null ? `CH ${fmt(x.e.ch, 0)}` : null].filter(Boolean).map(s => " · " + s).join("")))
+            : h(React.Fragment, null,
+              h("div", { className: "hist-main" }, h("i", { className: "lg-dot lg-hollow" }), `${x.e.oz} ${(ADDITIVES[x.e.chem] || {}).unit || "oz"} ${x.e.chem}`),
+              h("div", { className: "hint" }, fmtDT(x.t), ADDITIVES[x.e.chem] ? `${ADDITIVES[x.e.chem].Cl ? ` · FC ${signed(ADDITIVES[x.e.chem].Cl * x.e.oz / config.volume, 1)}` : ""}${ADDITIVES[x.e.chem].pH ? ` · pH ${signed(ADDITIVES[x.e.chem].pH * x.e.oz / config.volume, 2)}` : ""}${ADDITIVES[x.e.chem].TA ? ` · TA ${signed(ADDITIVES[x.e.chem].TA * x.e.oz / config.volume, 0)}` : ""}` : ""))),
+        h("button", { type: "button", className: "icon-btn", "aria-label": `Delete entry from ${fmtDT(x.t)}`, onClick: () => {
+          if (!confirm("Delete this entry?")) return;
+          if (x.kind === "meas") setMeasurements(measurements.filter(m => m !== x.e)); else setDoses(doses.filter(d => d !== x.e));
+        } }, h(Icon, { name: "trash", size: 16 })))),
+      h("button", { type: "button", className: "btn-ghost full", onClick: () => setShowAll(v => !v) }, showAll ? "Show recent only" : "Full history")));
 }
-function Advisor({
-  measurements,
-  latest,
-  config,
-  learned,
-  effFrac
-}) {
+
+/* ===================== ADVISOR ===================== */
+function Advisor({ measurements, latest, config, learned, effFrac, plan, effectOf, logDoseNow, curTemp, effPhEq, effPhK }) {
   const chLatest = latest ? latest.ch : null;
   const taLatest = latest ? latest.ta : null;
   const phLatest = latest ? latest.ph : null;
@@ -2034,789 +2180,139 @@ function Advisor({
   const floorCurrent = phFloorAt(taLatest);
   const floorTarget = phFloorAt(taTarget);
 
-  const conditionsCard = /*#__PURE__*/React.createElement("div", { style: S.insight },
-    /*#__PURE__*/React.createElement("div", { style: S.insightK }, "Current conditions"),
-    /*#__PURE__*/React.createElement("div", { style: S.whatIfRow },
-      /*#__PURE__*/React.createElement("div", { style: S.whatIfField },
-        /*#__PURE__*/React.createElement("label", { style: S.targetLabel }, "Water temp (\u00B0F)"),
-        /*#__PURE__*/React.createElement("input", {
-          type: "number",
-          style: S.inputSm,
-          placeholder: fmt(defaultTemp, 0),
-          value: tempOverride,
-          onChange: e => setTempOverride(e.target.value)
-        })
-      ),
-      /*#__PURE__*/React.createElement("div", { style: S.whatIfField },
-        /*#__PURE__*/React.createElement("span", { style: S.targetLabel }, "Calcium hardness (ppm)"),
-        /*#__PURE__*/React.createElement("div", { style: { fontSize: 15, marginTop: 4 } }, fmt(chLatest, 0), /*#__PURE__*/React.createElement("span", { style: { color: "#9a9890", fontStyle: "italic", marginLeft: 6, fontSize: 12 } }, "static \u2014 from your log"))
-      ),
-      /*#__PURE__*/React.createElement("div", { style: S.whatIfField },
-        /*#__PURE__*/React.createElement("span", { style: S.targetLabel }, "Chlorine loss rate"),
-        /*#__PURE__*/React.createElement("div", { style: { fontSize: 15, marginTop: 4 } },
-          learned && learned.totalLoss != null ? fmt(learned.totalLoss) + " ppm/day \u00B7 " + fmt(frac * 100, 0) + "%/day" : fmt(frac * 100, 0) + "%/day (fallback)",
-          /*#__PURE__*/React.createElement("span", { style: { color: "#9a9890", fontStyle: "italic", marginLeft: 6, fontSize: 12 } }, seasonLabel)
-        )
-      )
-    ),
-    /*#__PURE__*/React.createElement("div", { style: { fontSize: 12, color: "#9a9890", fontStyle: "italic", marginTop: 8 } }, "Leave temp blank to use your latest log entry. Override it to test a what-if. Calcium hardness is read directly from your log.")
-  );
-
-  const notReadyCard = /*#__PURE__*/React.createElement("div", { style: S.reminderGentle }, "Need CH, CYA and a temperature reading to compute a target \u2014 log a full measurement first.");
-
-  const boxText = (taLo == null || taHi == null)
-    ? "No TA hits your CSI target at this CH/temperature \u2014 CYA is too high relative to them."
-    : fmt(taLo, 0) + "\u2013" + fmt(taHi, 0) + " ppm keeps CSI within " + fmt(csiLo, 1) + " to " + fmt(csiHi, 1) + " at " + fmt(T_F, 0) + "\u00B0F and CH " + fmt(CH, 0) + ".";
-  const aimLine = (taLo != null && taHi != null) ? /*#__PURE__*/React.createElement("div", { style: { marginTop: 6 } }, "Given your ", seasonLabel, " chlorine loss, aim near ", /*#__PURE__*/React.createElement("b", null, fmt(taTarget, 0) + " ppm"), ".") : null;
-  const statusText = taLatest == null ? "No current TA logged." : inBox ? "Current TA (" + fmt(taLatest, 0) + ") is inside the box." : "Current TA (" + fmt(taLatest, 0) + ") is " + (taLatest < taLo ? "below" : "above") + " the box.";
-  const statusLine = (taLo != null && taHi != null) ? /*#__PURE__*/React.createElement("div", { style: { marginTop: 6, fontSize: 13, color: taLatest == null ? "#9a9890" : inBox ? "#2c7a4b" : "#b23b39" } }, statusText) : null;
-
-  const boxCard = /*#__PURE__*/React.createElement("div", { style: S.insight },
-    /*#__PURE__*/React.createElement("div", { style: S.insightK }, "Alkalinity box for these conditions"),
-    /*#__PURE__*/React.createElement("div", { style: S.insightV }, boxText, aimLine, statusLine)
-  );
-
-  const floorLine = (label, floor, taVal) => {
-    if (taVal == null) return null;
-    let text;
-    if (floor && floor.value != null) {
-      text = "At " + label + " TA (" + fmt(taVal, 0) + " ppm): floor \u2248 " + fmt(floor.value, 2);
-    } else if (floor && floor.reason === "below") {
-      text = "At " + label + " TA (" + fmt(taVal, 0) + " ppm): pH isn't the limit \u2014 CSI stays above your floor even down to pH 6.0";
-    } else if (floor && floor.reason === "never") {
-      text = "At " + label + " TA (" + fmt(taVal, 0) + " ppm): even pH 9.0 can't reach your CSI floor \u2014 TA/CH need to come up regardless of pH";
-    } else {
-      text = "At " + label + " TA (" + fmt(taVal, 0) + " ppm): couldn't solve for a floor.";
-    }
-    return /*#__PURE__*/React.createElement("div", { style: { marginTop: 6 } }, text);
+  // ---------- render ----------
+  const acEff = plan.acid ? effectOf(plan.acid.chem, plan.acid.defaultOz) : null;
+  const acCap = plan.acid ? effectOf(plan.acid.chem, ACID_STEPS[ACID_STEPS.length - 1]) : null;
+  const boxPct = v => taLo == null || taHi == null || v == null ? null : Math.max(0, Math.min(100, v / Math.max(200, taHi * 1.2) * 100));
+  const scaleMax = taLo == null || taHi == null ? 200 : Math.max(200, Math.ceil(taHi * 1.2 / 50) * 50);
+  const pct = v => v == null ? null : Math.max(0, Math.min(100, v / scaleMax * 100));
+  const floorText = (floor, taVal) => {
+    if (taVal == null) return "—";
+    if (floor && floor.value != null) return fmt(floor.value, 2);
+    if (floor && floor.reason === "below") return "none";
+    if (floor && floor.reason === "never") return "n/a";
+    return "—";
   };
-  const marginLine = (() => {
-    if (!floorCurrent || floorCurrent.value == null || phLatest == null) return null;
-    const margin = phLatest - floorCurrent.value;
-    const color = margin < 0 ? "#b23b39" : margin < 0.15 ? "#c07a18" : "#2c7a4b";
-    const text = margin < 0
-      ? "You're currently at pH " + fmt(phLatest, 2) + " \u2014 already " + fmt(Math.abs(margin), 2) + " below that floor."
-      : "You're currently at pH " + fmt(phLatest, 2) + " \u2014 about " + fmt(margin, 2) + " above that floor.";
-    return /*#__PURE__*/React.createElement("div", { style: { marginTop: 6, fontSize: 13, color } }, text);
+  const floorNote = (() => {
+    const f = floorCurrent;
+    if (!f) return null;
+    if (f.value != null && phLatest != null) {
+      const m = phLatest - f.value;
+      return m < 0 ? `You are already ${fmt(Math.abs(m), 2)} below the floor; raise pH or alkalinity before anything else.`
+        : `${fmt(m, 2)} of headroom below your current pH; an acid dose that overshoots a little will not turn the water corrosive.`;
+    }
+    if (f.reason === "below") return "pH is not the limit here: CSI stays above your floor even at pH 6.0.";
+    if (f.reason === "never") return "Even pH 9.0 cannot reach your CSI floor; TA or CH needs to come up regardless of pH.";
+    return null;
   })();
-  const phCard = /*#__PURE__*/React.createElement("div", { style: S.insight },
-    /*#__PURE__*/React.createElement("div", { style: S.insightK }, "Lowest safe pH"),
-    /*#__PURE__*/React.createElement("div", { style: S.insightV },
-      floorLine("current", floorCurrent, taLatest),
-      marginLine,
-      floorLine("target", floorTarget, taTarget)
-    )
-  );
-
-  const taDoseRow = taDose ? /*#__PURE__*/React.createElement("div", { style: S.recRow },
-    /*#__PURE__*/React.createElement("span", { style: S.recDose }, taDose.oz, " ", ADDITIVES[taDose.chem].unit),
-    /*#__PURE__*/React.createElement("span", { style: S.recChem }, taDose.chem),
-    /*#__PURE__*/React.createElement("span", { style: S.recReason }, taDose.note)
-  ) : null;
-  const recCard = taDose ? /*#__PURE__*/React.createElement("div", { style: S.recBox },
-    /*#__PURE__*/React.createElement("div", { style: S.recTitle }, "To reach the target"),
-    taDoseRow
-  ) : null;
-
-  const footerCard = /*#__PURE__*/React.createElement("div", { style: S.footer }, "Alkalinity box and pH floor both solved from your CSI formula (target range set in Settings), holding CH fixed at your logged value and pH at your target midpoint for the box. Chlorine loss rate shifts where in the box to sit \u2014 lower TA when loss is high (more sun/aeration, faster pH creep), higher TA when loss is low (less monitoring, more benefit from a bigger buffer). The pH floor is the lowest pH that keeps CSI at or above your configured minimum at a given TA \u2014 useful if you're running pH low for chlorine efficacy and want to know your margin.");
-
-  const readyBlock = /*#__PURE__*/React.createElement(React.Fragment, null,
-    /*#__PURE__*/React.createElement("div", { className: "two-col", style: S.insightRow }, boxCard, phCard),
-    recCard,
-    footerCard
-  );
-
-  return /*#__PURE__*/React.createElement("div", null,
-    conditionsCard,
-    ready ? readyBlock : notReadyCard
-  );
+  return h("div", { className: "page" },
+    h("p", { className: "p lead" }, "Where should alkalinity and pH sit so CSI stays in range at this calcium, CYA and temperature?"),
+    h(Card, null,
+      h(CardHead, { title: "Current conditions" }),
+      h("div", { className: "grid3" },
+        h("div", { className: "field" }, h("label", { htmlFor: "adv-temp" }, "Water temp °F"), h("input", { id: "adv-temp", type: "number", inputMode: "decimal", placeholder: fmt(defaultTemp, 0), value: tempOverride, onChange: e => setTempOverride(e.target.value) }), h("span", { className: "hint" }, "blank = last log")),
+        h("div", { className: "field" }, h("span", { className: "lab" }, "Calcium"), h("b", { className: "ro", style: { color: colorOf("ch") } }, fmt(chLatest, 0), " ppm"), h("span", { className: "hint" }, "from log, fixed")),
+        h("div", { className: "field" }, h("span", { className: "lab" }, "Cl loss"), h("b", { className: "ro", style: { color: colorOf("fc") } }, `${fmt(frac * 100, 0)}%/day`), h("span", { className: "hint" }, seasonLabel)))),
+    !ready ? h("div", { className: "banner" }, h("span", { className: "sq", style: { background: C.gold } }), h("span", null, "Need CH, CYA and a temperature reading to compute a target. Log a full measurement first."))
+      : h(React.Fragment, null,
+        h(Card, { accent: colorOf("ta") },
+          h(CardHead, { title: "Alkalinity box", sub: `pH held at ${fmt(phMid, 2)} · CSI ${fmtVal("csi", csiLo)} to ${fmtVal("csi", csiHi)}` }),
+          taLo == null || taHi == null ? h("p", { className: "p" }, "No TA hits your CSI target at this CH and temperature; CYA is too high relative to them.")
+            : h(React.Fragment, null,
+              h("div", { className: "hero-row", style: { alignItems: "baseline" } },
+                h("div", { className: "hero-val mid", style: { whiteSpace: "nowrap", fontSize: 32 } }, h("span", { style: { color: colorOf("ta") } }, `${fmt(taLo, 0)}–${fmt(taHi, 0)}`)),
+                h("div", { className: "hero-side", style: { textAlign: "left", alignItems: "flex-start" } }, h("span", null, "ppm · aim near ", h("b", null, `${fmt(taTarget, 0)}`), ` given your ${seasonLabel} chlorine loss`))),
+              h("div", { className: "tabar" },
+                h("div", { className: "tabar-box", style: { left: `${pct(taLo)}%`, width: `${pct(taHi) - pct(taLo)}%` } }),
+                h("div", { className: "tabar-pin", style: { left: `${pct(taTarget)}%`, background: colorOf("ta") } }),
+                taLatest != null ? h("div", { className: "tabar-pin", style: { left: `${pct(taLatest)}%`, background: C.ink } }) : null),
+              h("div", { className: "gauge-axis" }, h("span", null, "0"), h("span", null, `${fmt(taLo, 0)}`), h("span", null, taLatest != null ? `current ${fmt(taLatest, 0)} · target ${fmt(taTarget, 0)}` : `target ${fmt(taTarget, 0)}`), h("span", null, `${fmt(taHi, 0)}`), h("span", null, `${scaleMax}`)),
+              h("p", { className: "p" }, taLatest == null ? "No current TA logged." : inBox ? `Current TA (${fmt(taLatest, 0)}) is inside the box and ${fmt(Math.abs(taLatest - taTarget), 0)} ppm from the seasonal target.` : `Current TA (${fmt(taLatest, 0)}) is ${taLatest < taLo ? "below" : "above"} the box.`))),
+        h(Card, { accent: colorOf("ph") },
+          h(CardHead, { title: "Lowest safe pH", sub: `keeps CSI ≥ ${fmtVal("csi", csiLo)}` }),
+          h("div", { className: "grid2" },
+            h("div", { className: "stat" }, h("span", null, `at current TA ${fmt(taLatest, 0)}`), h("b", { style: { color: colorOf("ph") } }, floorText(floorCurrent, taLatest))),
+            h("div", { className: "stat" }, h("span", null, `at target TA ${fmt(taTarget, 0)}`), h("b", { style: { color: colorOf("ph") } }, floorText(floorTarget, taTarget)))),
+          floorNote ? h("p", { className: "p" }, floorNote) : null),
+        h(Card, null,
+          h(CardHead, { title: "To reach the target" }),
+          plan.acid && acEff ? h("div", { className: "rec" },
+            h("div", { className: "rec-amt" }, h("b", { style: { color: colorOf("ph") } }, `${plan.acid.defaultOz} fl oz`), h("span", null, plan.acid.chem)),
+            h("p", { className: "p" }, `Your standard acid dose, called for because pH ${fmt(phLatest, 2)} is above the ${fmt(numOr(config.phHi, 7.8), 1)} ceiling. Immediately: pH ${fmt(acEff.ph, 2)}, TA ${fmt(acEff.ta, 0)}, CSI ${fmtVal("csi", acEff.csiNow)}${floorCurrent && floorCurrent.value != null && acEff.ph < floorCurrent.value ? `, ${fmt(floorCurrent.value - acEff.ph, 2)} past the floor` : ""}. Drift at k=${fmt(effPhK, 2)}/day brings pH to ${fmt(acEff.ph1, 2)} by this time tomorrow (CSI ${fmtVal("csi", acEff.csi1)}).${acCap ? ` ${ACID_STEPS[ACID_STEPS.length - 1]} fl oz is the cap and would sit at ${fmt(acCap.ph, 2)} / CSI ${fmtVal("csi", acCap.csiNow)}.` : ""}`),
+            h("button", { type: "button", className: "btn-primary tall", onClick: () => logDoseNow(plan.acid.chem, plan.acid.defaultOz) }, `Added ${plan.acid.defaultOz} fl oz, log it`))
+            : h("div", { className: "rec" }, h("div", { className: "rec-amt" }, h("b", null, "0 fl oz"), h("span", null, "muriatic acid")), h("p", { className: "p" }, phLatest == null ? "No pH reading yet." : `pH ${fmt(phLatest, 2)} is at or below the ${fmt(numOr(config.phHi, 7.8), 1)} ceiling; no acid until it is called for.`)),
+          h("div", { className: "rec", style: { borderTop: `1.33px solid ${C.g300}`, paddingTop: 12 } },
+            taDose ? h(React.Fragment, null,
+              h("div", { className: "rec-amt" }, h("b", { style: { color: colorOf("ta") } }, `${taDose.oz} ${ADDITIVES[taDose.chem].unit}`), h("span", null, taDose.chem)),
+              h("p", { className: "p" }, taDose.note[0].toUpperCase() + taDose.note.slice(1) + "."),
+              h("button", { type: "button", className: "btn-ghost full", onClick: () => logDoseNow(taDose.chem, taDose.oz) }, `Added ${taDose.oz} ${ADDITIVES[taDose.chem].unit}, log it`))
+              : h(React.Fragment, null, h("div", { className: "rec-amt" }, h("b", null, "0 oz"), h("span", null, "sodium bicarbonate")), h("p", { className: "p" }, taLatest == null ? "No TA logged." : "Alkalinity is already within 3 ppm of the seasonal target; bicarb would also lift pH."))))),
+    h("div", { className: "foot" }, "Alkalinity box and pH floor are both solved from the CSI formula by bisection, holding CH at the logged value and pH at the target midpoint for the box. The seasonal aim slides from the box top (winter) to the box bottom (summer) using the learned chlorine-loss rate."));
 }
-function Settings({
-  config,
-  setConfig,
-  learned,
-  effPhEq,
-  effPhEqInfo,
-  latestCya,
-  onReset,
-  onReseed
-}) {
-  const upd = (k, v) => setConfig({
-    ...config,
-    [k]: v === "" ? "" : Number(v)
-  });
-  const rows = [["volume", "Pool volume (gal)", 1], ["temp", "Default water temp (°F)", 1], ["rSun", "Fallback loss fraction (per day)", 0.01], ["phEq", "pH equilibrium", 0.1], ["phK", "pH drift speed", 0.05], ["chartDaysBack", "Chart range: days back", 1], ["chartDaysFwd", "Chart range: days forward", 1], ["lossWindow", "Chlorine loss window (days)", 1], ["sunStart", "Sun start (hour, 0-24)", 0.5], ["sunEnd", "Sun end (hour, 0-24)", 0.5], ["sunRamp", "Sun ramp duration (hours)", 0.25]];
-  const targets = [["Free chlorine (ppm)", "fcLo", "fcHi", 0.5], ["pH", "phLo", "phHi", 0.1], ["Cyanuric acid (ppm)", "cyaLo", "cyaHi", 5], ["Calcium hardness (ppm)", "chLo", "chHi", 10], ["Alkalinity (ppm)", "taLo", "taHi", 10], ["Saturation index (CSI)", "csiLo", "csiHi", 0.1]];
+
+/* ===================== SETTINGS ===================== */
+function Settings({ config, setConfig, learned, effPhEq, effPhEqInfo, latestCya, onReset, onReseed, syncStatus, exportCSV, counts }) {
+  const upd = (k, v) => setConfig({ ...config, [k]: v === "" ? "" : Number(v) });
+  const num = (id, label, k, step, extra) => h("div", { className: "field" },
+    h("label", { htmlFor: id, style: extra && extra.color ? { color: extra.color } : undefined }, label),
+    h("input", { id, type: "number", step, inputMode: "decimal", value: config[k] == null ? "" : config[k], placeholder: extra && extra.ph, onChange: e => upd(k, e.target.value) }),
+    extra && extra.hint ? h("span", { className: "hint" }, extra.hint) : null);
+  const range = (label, loK, hiK, step, color, bold) => h("div", { className: "trow" },
+    h("span", { style: { color, fontWeight: bold ? 700 : 400 } }, label),
+    h("input", { type: "number", step, inputMode: "decimal", "aria-label": label + " low", value: config[loK], onChange: e => upd(loK, e.target.value) }),
+    h("input", { type: "number", step, inputMode: "decimal", "aria-label": label + " high", value: config[hiK], onChange: e => upd(hiK, e.target.value) }));
   const canSuggest = latestCya != null && !isNaN(latestCya) && latestCya > 0;
-  const suggestFC = () => {
-    if (!canSuggest) return;
-    // FC band: 12%-16% of CYA, target 14% sits in the middle. Round to 0.5.
-    const lo = Math.round(latestCya * 0.12 * 2) / 2;
-    const hi = Math.round(latestCya * 0.16 * 2) / 2;
-    setConfig({
-      ...config,
-      fcLo: lo,
-      fcHi: hi
-    });
-  };
-  return /*#__PURE__*/React.createElement("div", {
-    style: S.settings
-  }, /*#__PURE__*/React.createElement("h3", {
-    style: S.logH
-  }, "Model & pool settings"), /*#__PURE__*/React.createElement("p", {
-    style: S.logHint
-  }, "The forecast decays chlorine by a daily fraction derived from your measured loss (loss per day \xF7 average FC over the window).", learned && learned.frac != null ? ` FC decay fraction is dynamically ${fmt(learned.frac * 100, 0)}%/day (from avg FC ${fmt(learned.avgFC)} ppm).` : ` FC decay is using the fallback fraction below until there are 2+ recent FC readings.`, learned && learned.phK != null ? ` pH drift k is dynamically ${fmt(learned.phK, 2)}/day (toward equilibrium ${fmt(effPhEq, 2)}, ${effPhEqInfo.source}).` : ` pH drift is using the fallback k below until there are 2+ recent pH readings (toward equilibrium ${fmt(effPhEq, 2)}, ${effPhEqInfo.source}).`), /*#__PURE__*/React.createElement("div", {
-    style: S.field
-  }, /*#__PURE__*/React.createElement("label", {
-    style: S.lab
-  }, "Pool name"), /*#__PURE__*/React.createElement("input", {
-    type: "text",
-    value: config.name || "",
-    placeholder: "e.g. Backyard Pool",
-    onChange: e => setConfig({
-      ...config,
-      name: e.target.value
-    }),
-    style: S.input
-  })), /*#__PURE__*/React.createElement("div", {
-    className: "two-col",
-    style: S.setGrid
-  }, rows.map(([k, l, step]) => /*#__PURE__*/React.createElement("div", {
-    key: k,
-    style: S.field
-  }, /*#__PURE__*/React.createElement("label", {
-    style: S.lab
-  }, l), /*#__PURE__*/React.createElement("input", {
-    type: "number",
-    step: step,
-    value: config[k],
-    onChange: e => upd(k, e.target.value),
-    style: S.input
-  }), k === "phEq" && effPhEqInfo ? /*#__PURE__*/React.createElement("div", {
-    style: { fontSize: 12, color: "#7a6f5a", marginTop: 4, fontStyle: "italic" }
-  }, `currently ${fmt(effPhEq, 2)} (${effPhEqInfo.source})`) : null))), /*#__PURE__*/React.createElement("h4", {
-    style: S.subH
-  }, "Target ranges"), /*#__PURE__*/React.createElement("p", {
-    style: S.logHint
-  }, "The low/high values used on the dashboard to flag each reading as low, in range, or high, and to draw the shaded band on the chart. Chlorine dosing aims for the midpoint of the chlorine range."), /*#__PURE__*/React.createElement("div", {
-    style: S.targetGrid
-  }, targets.map(([label, loK, hiK, step]) => /*#__PURE__*/React.createElement("div", {
-    key: loK,
-    style: S.targetRow
-  }, /*#__PURE__*/React.createElement("span", {
-    style: S.targetLabel
-  }, label), /*#__PURE__*/React.createElement("div", {
-    style: S.targetInputs
-  }, /*#__PURE__*/React.createElement("input", {
-    type: "number",
-    step: step,
-    value: config[loK],
-    onChange: e => upd(loK, e.target.value),
-    style: S.inputSm,
-    "aria-label": label + " low"
-  }), /*#__PURE__*/React.createElement("span", {
-    style: S.targetDash
-  }, "to"), /*#__PURE__*/React.createElement("input", {
-    type: "number",
-    step: step,
-    value: config[hiK],
-    onChange: e => upd(hiK, e.target.value),
-    style: S.inputSm,
-    "aria-label": label + " high"
-  }))))), /*#__PURE__*/React.createElement("div", {
-    style: S.suggestRow
-  }, /*#__PURE__*/React.createElement("button", {
-    onClick: suggestFC,
-    disabled: !canSuggest,
-    style: {
-      ...S.btnGhost,
-      opacity: canSuggest ? 1 : 0.5,
-      cursor: canSuggest ? "pointer" : "default"
-    }
-  }, "Suggest chlorine range from CYA"), /*#__PURE__*/React.createElement("span", {
-    style: S.suggestNote
-  }, canSuggest ? `From CYA ${fmt(latestCya, 0)}: sets FC 12–16% of CYA (${fmt(latestCya * 0.12)}–${fmt(latestCya * 0.16)} ppm), target 14% ≈ ${fmt(latestCya * 0.14)} ppm` : "Log a CYA reading to enable a chlorine-from-CYA suggestion")), /*#__PURE__*/React.createElement("div", {
-    style: S.dangerZone
-  }, /*#__PURE__*/React.createElement("button", {
-    onClick: onReseed,
-    style: S.btnGhost
-  }, "Reload spreadsheet data"), /*#__PURE__*/React.createElement("button", {
-    onClick: () => {
-      if (confirm("Delete all measurements and additives?")) onReset();
-    },
-    style: S.btnDanger
-  }, "Reset data")));
+  const suggestFC = () => { if (!canSuggest) return; setConfig({ ...config, fcLo: Math.round(latestCya * 0.12 * 2) / 2, fcHi: Math.round(latestCya * 0.16 * 2) / 2 }); };
+  const sunS = numOrDef(config.sunStart, 11), sunE = numOrDef(config.sunEnd, 17);
+  const sync = { synced: ["Cloud synced", C.green], offline: ["Offline, using cached copy", C.red], connecting: ["Connecting", C.g500], local: ["Local only (this browser)", C.g500] }[syncStatus] || ["", C.g500];
+  return h("div", { className: "page" },
+    h(Card, null, h(CardHead, { title: "Pool" }),
+      h("div", { className: "grid2" },
+        h("div", { className: "field" }, h("label", { htmlFor: "s-name" }, "Name"), h("input", { id: "s-name", type: "text", value: config.name || "", placeholder: "e.g. Backyard Pool", onChange: e => setConfig({ ...config, name: e.target.value }) })),
+        num("s-vol", "Volume (gal)", "volume", 1))),
+    h(Card, null, h(CardHead, { title: "Dosing", sub: "container sizes used by the Home actions" }),
+      h("div", { className: "grid2" },
+        num("s-jug", "Chlorine jug (fl oz)", "jugOz", 1, { color: colorOf("fc"), ph: "64", hint: "whole jugs of NaOCl 10.5%" }),
+        h("div", { className: "field" }, h("label", { htmlFor: "s-acid", style: { color: colorOf("ph") } }, "Acid default (fl oz)"),
+          h("select", { id: "s-acid", value: ACID_STEPS.includes(Number(config.acidDefaultOz)) ? Number(config.acidDefaultOz) : 43, onChange: e => upd("acidDefaultOz", e.target.value) }, ACID_STEPS.map(v => h("option", { key: v, value: v }, v))),
+          h("span", { className: "hint" }, `steps ${ACID_STEPS.join(" · ")}; ${ACID_STEPS[ACID_STEPS.length - 1]} is the cap`)))),
+    h(Card, null, h(CardHead, { title: "Target ranges", right: h("span", { className: "hint" }, "low · high") }),
+      range("Free chlorine", "fcLo", "fcHi", 0.5, colorOf("fc"), true),
+      h("div", { className: "trow sug" }, h("span", { className: "hint" }, canSuggest ? `CYA is ${fmt(latestCya, 0)} ppm → suggested FC ${fmt(latestCya * 0.12)}–${fmt(latestCya * 0.16)} (12–16% of CYA)` : "Log a CYA reading to get a chlorine range suggestion"), h("button", { type: "button", className: "btn-ghost sm", disabled: !canSuggest, onClick: suggestFC }, "Use")),
+      range("pH", "phLo", "phHi", 0.1, colorOf("ph"), true),
+      range("CSI", "csiLo", "csiHi", 0.1, colorOf("csi"), true),
+      range("Cyanuric acid", "cyaLo", "cyaHi", 5, colorOf("cya"), false),
+      range("Alkalinity", "taLo", "taHi", 10, colorOf("ta"), false),
+      range("Calcium hardness", "chLo", "chHi", 10, colorOf("ch"), false)),
+    h(Card, null, h(CardHead, { title: "Model" }),
+      h("p", { className: "p" }, `Learned values come from your last ${numOrDef(config.lossWindow, 14)} days of readings and are used when there are 2 or more. Fallbacks apply otherwise.`),
+      h("div", { className: "mgrid" },
+        h("span"), h("span", { className: "mh" }, "learned"), h("span", { className: "mh" }, "fallback"),
+        h("label", { htmlFor: "s-rsun", style: { color: colorOf("fc"), fontWeight: 600 } }, "FC loss / day"), h("span", { className: "mv" }, learned && learned.frac != null ? `${fmt(learned.frac * 100, 0)}%` : "—"), h("input", { id: "s-rsun", type: "number", step: 0.01, inputMode: "decimal", value: config.rSun, onChange: e => upd("rSun", e.target.value) }),
+        h("label", { htmlFor: "s-phk", style: { color: colorOf("ph"), fontWeight: 600 } }, "pH drift k / day"), h("span", { className: "mv" }, learned && learned.phK != null ? fmt(learned.phK, 2) : "—"), h("input", { id: "s-phk", type: "number", step: 0.05, inputMode: "decimal", value: config.phK, onChange: e => upd("phK", e.target.value) }),
+        h("label", { htmlFor: "s-pheq", style: { color: colorOf("ph"), fontWeight: 600 } }, "pH equilibrium"), h("span", { className: "mv" }, effPhEqInfo.source === "override" ? "—" : fmt(effPhEq, 2)), h("input", { id: "s-pheq", type: "number", step: 0.1, inputMode: "decimal", placeholder: "auto", value: config.phEq, onChange: e => upd("phEq", e.target.value) })),
+      h("p", { className: "p" }, effPhEqInfo.source === "override" ? `Equilibrium is overridden to ${fmt(effPhEq, 2)}; clear the field to use the chemistry prediction.` : effPhEqInfo.source === "predicted" ? `Equilibrium ${fmt(effPhEq, 2)} is predicted from open-system carbonate chemistry at your latest TA; enter a value to override.` : `Equilibrium is the default ${fmt(effPhEq, 2)} until a reading with pH and TA exists.`),
+      h("div", { className: "grid2", style: { borderTop: `1.33px solid ${C.g300}`, paddingTop: 10 } },
+        num("s-win", "Learning window (days)", "lossWindow", 1),
+        num("s-temp", "Default temp (°F)", "temp", 1, { hint: "used when a reading has no temp" }))),
+    h(Card, null, h(CardHead, { title: "Sun window", sub: "chlorine loss is applied only between these hours" }),
+      h("div", { className: "grid3" }, num("s-ss", "Start (h)", "sunStart", 0.5), num("s-se", "End (h)", "sunEnd", 0.5), num("s-sr", "Ramp (h)", "sunRamp", 0.25)),
+      h("div", { className: "sunbar" }, h("div", { style: { width: `${sunS / 24 * 100}%`, background: C.g100 } }), h("div", { style: { width: `${Math.max(0, sunE - sunS) / 24 * 100}%`, background: C.gold } }), h("div", { style: { flex: 1, background: C.g100 } })),
+      h("div", { className: "gauge-axis" }, h("span", null, "0:00"), h("span", null, `${sunS}:00`), h("span", null, `${sunE}:00`), h("span", null, "24:00"))),
+    h(Card, null, h(CardHead, { title: "Chart" }),
+      h("div", { className: "grid2" }, num("s-db", "Days back", "chartDaysBack", 1), num("s-df", "Days forward", "chartDaysFwd", 1))),
+    h(Card, null, h(CardHead, { title: "Data and sync" }),
+      h("div", { className: "row-between" },
+        h("div", null, h("div", { className: "hist-main" }, h("span", { className: "dot", style: { background: sync[1] } }), sync[0]), h("div", { className: "hint" }, SYNC_ON ? `Supabase · ${counts.m} measurements · ${counts.d} additives` : `${counts.m} measurements · ${counts.d} additives`)),
+        h("span", { className: "chip", style: { background: C.g100, color: C.ink } }, SYNC_ON ? "POOL_ID set" : "no POOL_ID")),
+      h("p", { className: "p" }, "Sync keys live in the POOL_CONFIG block at the top of index.html, not in these settings. Anyone with the POOL_ID can read and write this pool."),
+      h("div", { className: "grid2", style: { borderTop: `1.33px solid ${C.g300}`, paddingTop: 10 } },
+        h("button", { type: "button", className: "btn-ghost", onClick: exportCSV }, "Export CSV"),
+        h("button", { type: "button", className: "btn-ghost", onClick: () => { if (confirm("Replace current data with the spreadsheet seed?")) onReseed(); } }, "Reload spreadsheet")),
+      h("button", { type: "button", className: "btn-danger", onClick: () => { if (confirm("Delete all measurements and additives?")) onReset(); } }, "Delete all measurements and additives")));
 }
-const S = {
-  app: {
-    fontFamily: "'Iowan Old Style',Georgia,serif",
-    maxWidth: 1000,
-    margin: "0 auto",
-    padding: "8px 16px 40px",
-    color: "#2b2a27",
-    background: "#fcfbf7"
-  },
-  header: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "flex-end",
-    flexWrap: "wrap",
-    gap: 12,
-    paddingTop: 14,
-    paddingBottom: 14,
-    borderBottom: "2px solid #2b2a27"
-  },
-  kicker: {
-    fontFamily: "ui-monospace,monospace",
-    fontSize: 11,
-    letterSpacing: 2,
-    color: "#9a9890"
-  },
-  h1: {
-    fontSize: 26,
-    margin: "2px 0 0",
-    fontWeight: 600,
-    letterSpacing: -0.3
-  },
-  headRight: {
-    display: "flex",
-    alignItems: "flex-end",
-    gap: 14
-  },
-  syncCol: {
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "flex-end",
-    gap: 6
-  },
-  syncBadge: {
-    fontSize: 11,
-    fontFamily: "ui-monospace,monospace",
-    padding: "3px 9px",
-    borderRadius: 20,
-    whiteSpace: "nowrap"
-  },
-  calib: {
-    textAlign: "right",
-    display: "flex",
-    flexDirection: "column",
-    gap: 1
-  },
-  calibLabel: {
-    fontFamily: "ui-monospace,monospace",
-    fontSize: 10,
-    letterSpacing: 1,
-    color: "#9a9890",
-    textTransform: "uppercase"
-  },
-  calibVal: {
-    fontSize: 18,
-    fontWeight: 600,
-    color: "#2f6fb0"
-  },
-  calibNote: {
-    fontSize: 11,
-    color: "#9a9890",
-    fontStyle: "italic"
-  },
-  exportBtn: {
-    fontFamily: "ui-monospace,monospace",
-    fontSize: 11,
-    letterSpacing: 1,
-    textTransform: "uppercase",
-    background: "#fff",
-    color: "#2b2a27",
-    border: "1px solid #ddd9cf",
-    borderRadius: 6,
-    padding: "8px 12px",
-    cursor: "pointer"
-  },
-  tabs: {
-    display: "flex",
-    gap: 4,
-    margin: "16px 0 18px"
-  },
-  tab: {
-    fontFamily: "ui-monospace,monospace",
-    fontSize: 12,
-    letterSpacing: 1,
-    padding: "7px 16px",
-    border: "1px solid #ddd9cf",
-    background: "#fff",
-    borderRadius: 6,
-    cursor: "pointer",
-    color: "#6a6860",
-    textTransform: "uppercase"
-  },
-  tabActive: {
-    background: "#2b2a27",
-    color: "#fcfbf7",
-    borderColor: "#2b2a27"
-  },
-  whatIfRow: {
-    display: "flex",
-    gap: 20,
-    flexWrap: "wrap",
-    marginTop: 8
-  },
-  whatIfField: {
-    display: "flex",
-    flexDirection: "column",
-    gap: 4,
-    minWidth: 150
-  },
-  cards: {
-    display: "grid",
-    gridTemplateColumns: "repeat(auto-fit,minmax(140px,1fr))",
-    gap: 8,
-    marginBottom: 14
-  },
-  card: {
-    textAlign: "left",
-    background: "#fff",
-    border: "1px solid #e7e3d8",
-    borderRadius: 10,
-    padding: "12px 14px",
-    cursor: "pointer",
-    transition: "all .12s"
-  },
-  cardLabel: {
-    fontFamily: "ui-monospace,monospace",
-    fontSize: 10,
-    letterSpacing: .8,
-    color: "#9a9890",
-    textTransform: "uppercase"
-  },
-  cardVal: {
-    fontSize: 26,
-    fontWeight: 600,
-    lineHeight: 1.1,
-    margin: "3px 0 6px"
-  },
-  cardUnit: {
-    fontSize: 12,
-    fontWeight: 400,
-    color: "#aaa",
-    marginLeft: 3,
-    opacity: .6
-  },
-  chip: {
-    display: "inline-block",
-    fontSize: 11,
-    fontFamily: "ui-monospace,monospace",
-    padding: "2px 8px",
-    borderRadius: 20
-  },
-  insightRow: {
-    display: "grid",
-    gridTemplateColumns: "1fr 1fr",
-    gap: 8,
-    marginBottom: 12
-  },
-  projNote: {
-    fontSize: 11,
-    fontFamily: "ui-monospace,monospace",
-    color: "#8a877e",
-    fontStyle: "italic",
-    marginBottom: 8,
-    padding: "2px 2px"
-  },
-  insight: {
-    background: "#fff",
-    border: "1px solid #e7e3d8",
-    borderRadius: 10,
-    padding: "12px 14px"
-  },
-  insightK: {
-    fontFamily: "ui-monospace,monospace",
-    fontSize: 10,
-    letterSpacing: .8,
-    color: "#9a9890",
-    textTransform: "uppercase",
-    marginBottom: 4
-  },
-  insightV: {
-    fontSize: 15,
-    lineHeight: 1.4
-  },
-  recBox: {
-    background: "#f4f7f2",
-    border: "1px solid #d4e3d2",
-    borderRadius: 10,
-    padding: "12px 14px",
-    marginBottom: 14
-  },
-  recTitle: {
-    fontFamily: "ui-monospace,monospace",
-    fontSize: 11,
-    letterSpacing: 1,
-    color: "#3f7a52",
-    textTransform: "uppercase",
-    marginBottom: 8
-  },
-  recRow: {
-    display: "flex",
-    alignItems: "baseline",
-    gap: 10,
-    padding: "3px 0",
-    flexWrap: "wrap"
-  },
-  reminderGentle: {
-    background: "#fdf7e8",
-    border: "1px solid #e8d49a",
-    borderRadius: 10,
-    padding: "10px 14px",
-    marginBottom: 14,
-    color: "#7a5d18",
-    fontSize: 14
-  },
-  reminderUrgent: {
-    background: "#fbece8",
-    border: "1px solid #e2a497",
-    borderRadius: 10,
-    padding: "10px 14px",
-    marginBottom: 14,
-    color: "#933b22",
-    fontSize: 14,
-    fontWeight: 500
-  },
-  recDose: {
-    fontWeight: 600,
-    fontSize: 16,
-    color: "#2b2a27",
-    minWidth: 78
-  },
-  recChem: {
-    fontSize: 14,
-    color: "#2b2a27"
-  },
-  recReason: {
-    fontSize: 13,
-    color: "#8a877e",
-    fontStyle: "italic"
-  },
-  chartWrap: {
-    background: "#fff",
-    border: "1px solid #e7e3d8",
-    borderRadius: 12,
-    padding: "14px 14px 8px"
-  },
-  chartHead: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: 8,
-    flexWrap: "wrap",
-    gap: 6
-  },
-  chartLegend: {
-    fontSize: 11,
-    color: "#9a9890",
-    fontFamily: "ui-monospace,monospace",
-    display: "flex",
-    alignItems: "center"
-  },
-  shadeKey: {
-    display: "inline-block",
-    width: 14,
-    height: 10,
-    background: "#88888822",
-    border: "1px solid #ccc",
-    marginLeft: 4,
-    verticalAlign: "middle"
-  },
-  todayNote: {
-    fontSize: 11,
-    color: "#9a9890",
-    fontStyle: "italic",
-    padding: "6px 2px 2px"
-  },
-  tip: {
-    background: "#2b2a27",
-    color: "#fcfbf7",
-    padding: "8px 10px",
-    borderRadius: 8,
-    fontSize: 12
-  },
-  tipDate: {
-    fontFamily: "ui-monospace,monospace",
-    fontSize: 10,
-    opacity: .7
-  },
-  tipVal: {
-    fontSize: 18,
-    fontWeight: 600,
-    margin: "2px 0"
-  },
-  tipTag: {
-    fontFamily: "ui-monospace,monospace",
-    fontSize: 10,
-    opacity: .7
-  },
-  logGrid: {
-    display: "grid",
-    gridTemplateColumns: "1fr 1fr",
-    gap: 16
-  },
-  logCol: {
-    background: "#fff",
-    border: "1px solid #e7e3d8",
-    borderRadius: 12,
-    padding: 16
-  },
-  logH: {
-    fontSize: 18,
-    margin: "0 0 4px",
-    fontWeight: 600
-  },
-  subH: {
-    fontSize: 13,
-    fontFamily: "ui-monospace,monospace",
-    letterSpacing: 1,
-    color: "#9a9890",
-    textTransform: "uppercase",
-    margin: "18px 0 8px",
-    borderTop: "1px solid #eee",
-    paddingTop: 10
-  },
-  logHint: {
-    fontSize: 13,
-    color: "#8a877e",
-    lineHeight: 1.45,
-    margin: "0 0 14px"
-  },
-  field: {
-    display: "flex",
-    flexDirection: "column",
-    gap: 3,
-    marginBottom: 10,
-    flex: 1
-  },
-  fieldRow: {
-    display: "flex",
-    gap: 8
-  },
-  lab: {
-    fontFamily: "ui-monospace,monospace",
-    fontSize: 10,
-    letterSpacing: .6,
-    color: "#9a9890",
-    textTransform: "uppercase"
-  },
-  input: {
-    fontFamily: "inherit",
-    fontSize: 14,
-    padding: "8px 10px",
-    border: "1px solid #ddd9cf",
-    borderRadius: 6,
-    background: "#fcfbf7",
-    color: "#2b2a27",
-    width: "100%"
-  },
-  btnPrimary: {
-    fontFamily: "ui-monospace,monospace",
-    fontSize: 12,
-    letterSpacing: 1,
-    textTransform: "uppercase",
-    background: "#2b2a27",
-    color: "#fcfbf7",
-    border: "none",
-    borderRadius: 6,
-    padding: "10px 16px",
-    cursor: "pointer",
-    marginTop: 4,
-    width: "100%"
-  },
-  preview: {
-    background: "#f4f6fa",
-    border: "1px solid #d6dfeb",
-    borderRadius: 8,
-    padding: "10px 12px",
-    marginBottom: 10
-  },
-  previewT: {
-    fontSize: 12,
-    color: "#5a7090",
-    marginBottom: 6,
-    fontFamily: "ui-monospace,monospace",
-    letterSpacing: .5
-  },
-  previewGrid: {
-    display: "flex",
-    flexWrap: "wrap",
-    gap: 6
-  },
-  previewChip: {
-    fontSize: 13,
-    background: "#fff",
-    border: "1px solid #cdd8e6",
-    borderRadius: 5,
-    padding: "3px 8px",
-    color: "#2f5080",
-    fontWeight: 600
-  },
-  histList: {
-    display: "flex",
-    flexDirection: "column",
-    gap: 3,
-    maxHeight: 220,
-    overflowY: "auto"
-  },
-  histRow: {
-    display: "flex",
-    alignItems: "center",
-    gap: 8,
-    fontSize: 13,
-    padding: "4px 6px",
-    borderRadius: 5,
-    background: "#fcfbf7"
-  },
-  histDate: {
-    fontFamily: "ui-monospace,monospace",
-    fontSize: 11,
-    color: "#9a9890",
-    minWidth: 78
-  },
-  histVals: {
-    flex: 1,
-    color: "#4a4842"
-  },
-  del: {
-    background: "none",
-    border: "none",
-    color: "#c0554f",
-    fontSize: 18,
-    cursor: "pointer",
-    lineHeight: 1,
-    padding: "0 4px"
-  },
-  settings: {
-    background: "#fff",
-    border: "1px solid #e7e3d8",
-    borderRadius: 12,
-    padding: 20,
-    maxWidth: 620
-  },
-  setGrid: {
-    display: "grid",
-    gridTemplateColumns: "1fr 1fr",
-    gap: "0 16px"
-  },
-  targetGrid: {
-    display: "flex",
-    flexDirection: "column",
-    gap: 8,
-    marginBottom: 4
-  },
-  suggestRow: {
-    display: "flex",
-    alignItems: "center",
-    gap: 12,
-    marginTop: 12,
-    flexWrap: "wrap"
-  },
-  suggestNote: {
-    fontSize: 12,
-    color: "#8a877e",
-    fontStyle: "italic",
-    flex: 1,
-    minWidth: 200
-  },
-  targetRow: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: 12
-  },
-  targetLabel: {
-    fontSize: 14,
-    color: "#4a4842"
-  },
-  targetInputs: {
-    display: "flex",
-    alignItems: "center",
-    gap: 8
-  },
-  targetDash: {
-    fontSize: 12,
-    color: "#9a9890"
-  },
-  inputSm: {
-    fontFamily: "inherit",
-    fontSize: 14,
-    padding: "6px 8px",
-    border: "1px solid #ddd9cf",
-    borderRadius: 6,
-    background: "#fcfbf7",
-    color: "#2b2a27",
-    width: 72,
-    textAlign: "center"
-  },
-  dangerZone: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginTop: 18,
-    paddingTop: 14,
-    borderTop: "1px solid #eee",
-    gap: 10,
-    flexWrap: "wrap"
-  },
-  btnGhost: {
-    fontFamily: "ui-monospace,monospace",
-    fontSize: 11,
-    letterSpacing: 1,
-    textTransform: "uppercase",
-    background: "#f4f6fa",
-    color: "#2f5080",
-    border: "1px solid #cdd8e6",
-    borderRadius: 6,
-    padding: "7px 14px",
-    cursor: "pointer"
-  },
-  btnDanger: {
-    fontFamily: "ui-monospace,monospace",
-    fontSize: 11,
-    letterSpacing: 1,
-    textTransform: "uppercase",
-    background: "#fbeceb",
-    color: "#b23b39",
-    border: "1px solid #e5c0bd",
-    borderRadius: 6,
-    padding: "7px 14px",
-    cursor: "pointer"
-  },
-  footer: {
-    fontSize: 12,
-    color: "#9a9890",
-    lineHeight: 1.5,
-    marginTop: 18,
-    paddingTop: 12,
-    borderTop: "1px solid #e7e3d8",
-    fontStyle: "italic"
-  },
-  dotSolid: c => ({
-    display: "inline-block",
-    width: 8,
-    height: 8,
-    borderRadius: 8,
-    background: c,
-    border: "1.5px solid #fff",
-    boxShadow: "0 0 0 1px " + c,
-    verticalAlign: "middle"
-  }),
-  dotHollow: c => ({
-    display: "inline-block",
-    width: 8,
-    height: 8,
-    borderRadius: 8,
-    background: "#fff",
-    border: "1.4px solid " + c,
-    verticalAlign: "middle"
-  })
-};
-ReactDOM.createRoot(document.getElementById("root")).render(/*#__PURE__*/React.createElement(App, null));
 
+ReactDOM.createRoot(document.getElementById("root")).render(h(App, null));
 </script>
 </body>
 </html>
