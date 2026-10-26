@@ -22,3 +22,15 @@ test("a reading logged before a same-day acid dose does not wreck the fit", () =
   const r = computeLearned({ measurements: m, doses: d, config: cfg, effPhEq: 8.3, phEqOverride: null });
   assert.ok(r.phK != null && r.phK < 1.5, `k=${r.phK}`);
 });
+
+test("pH that only falls between readings cannot pin a rate: learned k is null so the fallback applies", () => {
+  const m = [{ ts: ts(3), ph: 7.8, ...base }, { ts: ts(2), ph: 7.6 }, { ts: ts(1), ph: 7.4 }, { ts: ts(0), ph: 7.4 }];
+  const r = computeLearned({ measurements: m, doses: [], config: cfg, effPhEq: 8.3, phEqOverride: null });
+  assert.equal(r == null ? null : r.phK, null);
+});
+test("blank pH strings are ignored and never produce NaN", () => {
+  const m = [{ ts: ts(3), ph: 7.4, ...base }, { ts: ts(2), ph: "" }, { ts: ts(1), ph: 7.8 }, { ts: ts(0), ph: 7.8 }];
+  const r = computeLearned({ measurements: m, doses: [], config: cfg, effPhEq: 8.3, phEqOverride: null });
+  assert.ok(r.phK == null || Number.isFinite(r.phK));
+  assert.ok(r.phK > 0.2, `k=${r.phK}`);
+});
