@@ -85,7 +85,7 @@ export function computeLearned({ measurements, doses, config, effPhEq, phEqOverr
   // the result is null and the Settings fallback is used.
   const PH_RES = 0.2;
   const msSorted = measurements.slice().sort((a, b) => tsOf(a) - tsOf(b));
-  const phMs = msSorted.filter(m => m.ph != null);
+  const phMs = msSorted.filter(m => m.ph != null && m.ph !== "" && isFinite(Number(m.ph)));
   const lastKnown = (key, t) => { let v = null; for (const m of msSorted) { if (tsOf(m) > t) break; if (m[key] != null && m[key] !== "") v = Number(m[key]); } return v; };
   const intervals = [];
   for (let i = 1; i < phMs.length; i++) {
@@ -118,10 +118,15 @@ export function computeLearned({ measurements, doses, config, effPhEq, phEqOverr
     const minL = Math.min(...L);
     const flat = grid.filter((_, i) => L[i] <= minL + 1e-9);
     const kLo = flat[0], kHi = flat[flat.length - 1];
-    if (!(kLo <= 0.011 && kHi >= 2)) {
-      // informative: geometric midpoint of the optimum band (arithmetic if it touches zero)
-      dynPhK = kLo > 0 ? Math.sqrt(kLo * kHi) : kHi / 2;
+    // Uninformative cases fall back to the Settings value: the band spans everything, or the
+    // only fit is k = 0 exactly, which means the readings fell between tests in a way no
+    // outgassing rate can produce (an unlogged acid dose, rain, kit noise). A pool with a
+    // genuinely small rate still fits a band like 0.02-0.08, not the single point 0.
+    const informative = Number.isFinite(minL) && flat.length > 0 && !(kLo <= 0.011 && kHi >= 2) && kHi > 0.011;
+    if (informative) {
+      dynPhK = kLo > 0 ? Math.sqrt(kLo * kHi) : kHi / 2; // midpoint of the optimum band
       dynPhK = Math.max(0, Math.min(6, dynPhK));
+      if (!Number.isFinite(dynPhK)) dynPhK = null;
     }
   }
   if (totalLoss == null && dynPhK == null) return null;
