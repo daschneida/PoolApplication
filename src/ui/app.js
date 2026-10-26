@@ -134,11 +134,15 @@ export function App() {
   }, [config, measurements, doses, loaded]);
   // pH equilibrium: manual override if set, else predicted from chemistry of latest reading.
   const effPhEqInfo = useMemo(() => computePhEqInfo({ config, measurements }), [config.phEq, config.temp, measurements]);
-  const effPhEq = effPhEqInfo.value;
-  const phEqOverride = effPhEqInfo.source === "override" ? effPhEqInfo.value : null;
+  const phEqManual = effPhEqInfo.source === "override" ? effPhEqInfo.value : null;
   const lastTemp = useMemo(() => computeLastTemp({ measurements, config }), [measurements, config.temp]);
 
-  const learned = useMemo(() => computeLearned({ measurements, doses, config, effPhEq, phEqOverride }), [measurements, doses, config.volume, config.lossWindow, config.temp, effPhEq, phEqOverride]);
+  const learned = useMemo(() => computeLearned({ measurements, doses, config, effPhEq: effPhEqInfo.value, phEqOverride: phEqManual }), [measurements, doses, config.volume, config.lossWindow, config.temp, effPhEqInfo.value, phEqManual]);
+  // Equilibrium pH the model drifts toward: manual override, else the fitted value when the
+  // readings say the pool plateaus below the atmospheric prediction, else the prediction.
+  const phEqOverride = phEqManual != null ? phEqManual : learned && Number.isFinite(learned.phEqFit) ? learned.phEqFit : null;
+  const effPhEq = phEqOverride != null ? phEqOverride : effPhEqInfo.value;
+  const effPhEqSource = phEqManual != null ? "override" : learned && Number.isFinite(learned.phEqFit) ? "learned" : effPhEqInfo.source;
 
   // Forecast parameters: dynamic when available, else the Settings fallback.
   // Effective model parameters: learned when finite, else the Settings fallback. Never NaN,
@@ -208,7 +212,8 @@ export function App() {
   }, [loaded]);
   if (!loaded) return h(Splash, { out: false, name: config.name });
 
-  const shared = { config, latest, series, chartSeries, forecast, learned, effFrac, effPhK, effPhEq, effPhEqInfo, plan, advice, effectOf, logDoseNow, curTemp, lastMeasTs, setTab, setFocus, focus };
+  const effPhEqView = { value: effPhEq, source: effPhEqSource, predicted: effPhEqInfo.value };
+  const shared = { config, latest, series, chartSeries, forecast, learned, effFrac, effPhK, effPhEq, effPhEqInfo: effPhEqView, plan, advice, effectOf, logDoseNow, curTemp, lastMeasTs, setTab, setFocus, focus };
 
   return h("div", { className: "app" },
     h(TopBar, { config, latest, syncStatus, tab }),
@@ -217,7 +222,7 @@ export function App() {
     tab === "log" && h(LogTab, { ...shared, measurements, setMeasurements, doses, setDoses }),
     tab === "advisor" && h(Advisor, { measurements, latest, config, learned, effFrac, plan, advice, effectOf, logDoseNow, curTemp, effPhEq, effPhK }),
     tab === "settings" && h(Settings, {
-      config, setConfig, learned, effPhK, effPhEq, effPhEqInfo, syncStatus, exportCSV,
+      config, setConfig, learned, effPhK, effPhEq, effPhEqInfo: effPhEqView, syncStatus, exportCSV,
       latestCya: latest ? latest.cya : null,
       counts: { m: measurements.length, d: doses.length },
       onReset: () => { setMeasurements([]); setDoses([]); },

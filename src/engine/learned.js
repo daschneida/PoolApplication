@@ -1,9 +1,10 @@
 import { MS_DAY, HOUR, tsOf } from "../chem/time.js";
 import { ADDITIVES } from "../chem/additives.js";
-import { applyDose, outgasPH } from "../chem/carbonate.js";
+import { applyDose, outgasPH, phEquilibrium } from "../chem/carbonate.js";
 
 // Calibration from the owner's own readings: FC loss over the window and the CO2 outgassing rate.
 export function computeLearned({ measurements, doses, config, effPhEq, phEqOverride }) {
+  // phEqOverride here is the MANUAL override only; a fitted equilibrium comes out of this function
   const win = config.lossWindow === "" || config.lossWindow == null || isNaN(config.lossWindow) ? 14 : Number(config.lossWindow);
   const cutoff = Date.now() - win * MS_DAY;
   const phEq = effPhEq;
@@ -70,19 +71,20 @@ export function computeLearned({ measurements, doses, config, effPhEq, phEqOverr
     }
   }
 
-  // ============== pH DRIFT (CO2 outgassing rate) ==============
-  // One outgassing rate kg (1/day) is fitted jointly to every interval between consecutive
-  // pH readings in the window. For each interval the start pH has the doses in (prev, cur]
-  // pushed through the carbonate system; the model then predicts the end pH for a given kg
-  // and the fit minimizes the mismatch. Two realities of a drop-test kit are built in:
-  //   - readings are quantized (0.2 steps on most kits), so a residual inside half a step
-  //     (PH_RES/2) counts as zero: an unchanged reading does not force kg toward zero, it
-  //     only says kg is below whatever would have moved the reading a full step;
-  //   - the occasional reading that is logged before a same-day dose produces a residual no
-  //     rate can explain, so residuals beyond the deadband are penalized linearly (Huber),
-  //     not squared, and cannot dominate the fit.
-  // If the data cannot tell kg = 0 from kg = 2 (every interval sits inside the deadband),
-  // the result is null and the Settings fallback is used.
+  // ============== pH DRIFT: outgassing rate AND effective equilibrium ==============
+  // Two things are fitted jointly to every interval between consecutive pH readings in the
+  // window: the CO2 outgassing rate kg (1/day) and the effective equilibrium pH. They are
+  // identified by different data: a plateau (pH sitting at 7.8 for days) pins the equilibrium,
+  // while the climb after an acid dose pins the rate. Fitting only kg would read a plateau as
+  // "no outgassing" and then forecast no recovery after acid, which is wrong: the CO2 excess
+  // at pH 7.2 is ten times larger than at 7.8.
+  // The equilibrium is searched from 7.5 up to the atmospheric prediction (never above it:
+  // covers, bather CO2 and weak aeration only ever pull it down), with a mild prior toward the
+  // prediction, and kg on a log grid with a mild prior toward a typical 0.3/day.
+  // Drop-test-kit realities: residuals inside half a kit step (PH_RES/2) count as zero, and
+  // residuals beyond one step are penalized linearly (Huber), so an unchanged reading never
+  // forces kg to zero and a reading logged before a same-day dose cannot dominate.
+  // When a manual equilibrium override is set, only kg is fitted against it.
   const PH_RES = 0.2;
   const msSorted = measurements.slice().sort((a, b) => tsOf(a) - tsOf(b));
   const phMs = msSorted.filter(m => m.ph != null && m.ph !== "" && isFinite(Number(m.ph)));
@@ -103,30 +105,31 @@ export function computeLearned({ measurements, doses, config, effPhEq, phEqOverr
     intervals.push({ phStart: st.ph, phEnd: Number(phMs[i].ph), days: hours / 24, ta: st.ta, cya: st.cya || 0, ch: st.ch, temp: st.temp });
   }
   const phIntervals = intervals.length;
-  let dynPhK = null;
+  let dynPhK = null, phEqFit = null;
   if (intervals.length >= 2) {
     const half = PH_RES / 2;
-    const loss = kg => intervals.reduce((acc, iv) => {
-      const r = Math.abs(outgasPH(iv.phStart, iv.ta, iv.cya, iv.days, kg, iv.temp, iv.ch, phEqOverride) - iv.phEnd);
-      const e = Math.max(0, r - half);           // deadband: inside half a kit step is a perfect fit
-      return acc + (e <= PH_RES ? e * e : PH_RES * (2 * e - PH_RES)); // Huber beyond one step
+    const last = intervals[intervals.length - 1];
+    const eqPred = phEquilibrium(last.ta, last.cya, last.temp, last.ch);
+    const misfit = (kg, eq) => intervals.reduce((acc, iv) => {
+      const r = Math.abs(outgasPH(iv.phStart, iv.ta, iv.cya, iv.days, kg, iv.temp, iv.ch, eq) - iv.phEnd);
+      const e = Math.max(0, r - half);
+      return acc + (e <= PH_RES ? e * e : PH_RES * (2 * e - PH_RES));
     }, 0);
-    // scan kg on a log grid from 0.01 to 6 (plus 0), then take the midpoint of the flat optimum
-    const grid = [0];
-    for (let g = Math.log(0.01); g <= Math.log(6) + 1e-9; g += (Math.log(6) - Math.log(0.01)) / 80) grid.push(Math.exp(g));
-    const L = grid.map(loss);
-    const minL = Math.min(...L);
-    const flat = grid.filter((_, i) => L[i] <= minL + 1e-9);
-    const kLo = flat[0], kHi = flat[flat.length - 1];
-    // Uninformative cases fall back to the Settings value: the band spans everything, or the
-    // only fit is k = 0 exactly, which means the readings fell between tests in a way no
-    // outgassing rate can produce (an unlogged acid dose, rain, kit noise). A pool with a
-    // genuinely small rate still fits a band like 0.02-0.08, not the single point 0.
-    const informative = Number.isFinite(minL) && flat.length > 0 && !(kLo <= 0.011 && kHi >= 2) && kHi > 0.011;
-    if (informative) {
-      dynPhK = kLo > 0 ? Math.sqrt(kLo * kHi) : kHi / 2; // midpoint of the optimum band
-      dynPhK = Math.max(0, Math.min(6, dynPhK));
-      if (!Number.isFinite(dynPhK)) dynPhK = null;
+    const K_PRIOR = 0.3, K_W = 0.004, EQ_W = 0.15;
+    const kGrid = [];
+    for (let g = Math.log(0.01); g <= Math.log(6) + 1e-9; g += (Math.log(6) - Math.log(0.01)) / 40) kGrid.push(Math.exp(g));
+    const eqGrid = [];
+    if (phEqOverride != null) eqGrid.push(phEqOverride);
+    else if (eqPred != null) for (let e = 7.5; e <= eqPred + 1e-9; e += 0.05) eqGrid.push(Math.min(e, eqPred));
+    if (eqGrid[eqGrid.length - 1] !== eqPred && phEqOverride == null && eqPred != null) eqGrid.push(eqPred);
+    let best = null;
+    for (const eq of eqGrid) for (const kg of kGrid) {
+      const L = misfit(kg, eq) + K_W * Math.pow(Math.log(kg / K_PRIOR), 2) + (phEqOverride == null ? EQ_W * Math.pow(eq - eqPred, 2) : 0);
+      if (Number.isFinite(L) && (best == null || L < best.L)) best = { L, kg, eq };
+    }
+    if (best) {
+      dynPhK = Math.max(0, Math.min(6, best.kg));
+      if (phEqOverride == null && Math.abs(best.eq - eqPred) > 0.025) phEqFit = best.eq;
     }
   }
   if (totalLoss == null && dynPhK == null) return null;
@@ -138,6 +141,7 @@ export function computeLearned({ measurements, doses, config, effPhEq, phEqOverr
     frac: dynFrac,
     avgFC,
     phK: dynPhK,
+    phEqFit,
     phIntervals,
     phEq
   };

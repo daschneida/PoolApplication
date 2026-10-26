@@ -1519,6 +1519,17 @@ function(a,b,c){if(!Vd(b))throw Error(n(200));return Wd(null,a,b,!1,c)};Q.unmoun
     const r = rangeOf(config, focus);
     const [pinned, setPinned] = useState(null);
     const data = useMemo(() => splitPastFuture(chartSeries, focus), [chartSeries, focus]);
+    const dayTicks = useMemo(() => {
+      if (!chartSeries.length) return [];
+      const t0 = chartSeries[0].t, t1 = chartSeries[chartSeries.length - 1].t;
+      const spanDays = (t1 - t0) / MS_DAY, step = Math.max(1, Math.ceil(spanDays / 5));
+      const d = new Date(t0);
+      d.setHours(0, 0, 0, 0);
+      d.setDate(d.getDate() + 1);
+      const out = [];
+      for (let t = d.getTime(); t <= t1; t += step * MS_DAY) out.push(t);
+      return out;
+    }, [chartSeries]);
     const measuredPts = chartSeries.filter((s) => s._meas && s._meas[focus]);
     const back = numOrDef(config.chartDaysBack, 21);
     const setBack = (d) => setConfig({ ...config, chartDaysBack: d });
@@ -1570,7 +1581,7 @@ function(a,b,c){if(!Vd(b))throw Error(n(200));return Wd(null,a,b,!1,c)};Q.unmoun
               if (e && e.activePayload && e.activePayload.length) setPinned(e.activePayload[0].payload);
             } },
             h(CartesianGrid, { stroke: C.g300, vertical: false }),
-            h(XAxis, { dataKey: "t", type: "number", scale: "time", domain: ["dataMin", "dataMax"], tick: { fontSize: 11, fill: C.ink }, tickFormatter: fmtMD, minTickGap: 40 }),
+            h(XAxis, { dataKey: "t", type: "number", scale: "time", domain: ["dataMin", "dataMax"], ticks: dayTicks, tick: { fontSize: 11, fill: C.ink }, tickFormatter: fmtMD, interval: 0 }),
             h(YAxis, { tick: { fontSize: 11, fill: C.ink }, domain: ["auto", "auto"], width: 48 }),
             h(Tooltip, { content: h(ChemTooltip, { param: p }) }),
             h(ReferenceArea, { y1: r.lo, y2: r.hi, fill: C.mint, fillOpacity: 0.35 }),
@@ -1994,7 +2005,7 @@ function(a,b,c){if(!Vd(b))throw Error(n(200));return Wd(null,a,b,!1,c)};Q.unmoun
   }
 
   // src/ui/settings.js
-  function Settings({ config, setConfig, learned, effPhEq, effPhEqInfo, latestCya, onReset, onReseed, syncStatus, exportCSV: exportCSV2, counts }) {
+  function Settings({ config, setConfig, learned, effPhK, effPhEq, effPhEqInfo, latestCya, onReset, onReseed, syncStatus, exportCSV: exportCSV2, counts }) {
     const upd = (k, v) => setConfig({ ...config, [k]: v === "" ? "" : Number(v) });
     const num = (id, label, k, step, extra) => h(
       "div",
@@ -2069,13 +2080,14 @@ function(a,b,c){if(!Vd(b))throw Error(n(200));return Wd(null,a,b,!1,c)};Q.unmoun
           h("span", { className: "mv" }, learned && learned.frac != null ? `${fmt(learned.frac * 100, 0)}%` : "\u2014"),
           h("input", { id: "s-rsun", type: "number", step: 0.01, inputMode: "decimal", value: config.rSun, onChange: (e) => upd("rSun", e.target.value) }),
           h("label", { htmlFor: "s-phk", style: { color: colorOf("ph"), fontWeight: 600 } }, "CO\u2082 outgassing k / day"),
-          h("span", { className: "mv" }, learned && learned.phK != null ? fmt(learned.phK, 2) : "\u2014"),
+          h("span", { className: "mv", title: learned ? `${learned.phIntervals || 0} pH intervals in window` : "" }, learned && learned.phK != null ? fmt(learned.phK, 2) : "\u2014"),
           h("input", { id: "s-phk", type: "number", step: 0.05, inputMode: "decimal", value: config.phK, onChange: (e) => upd("phK", e.target.value) }),
           h("label", { htmlFor: "s-pheq", style: { color: colorOf("ph"), fontWeight: 600 } }, "pH equilibrium"),
-          h("span", { className: "mv" }, effPhEqInfo.source === "override" ? "\u2014" : fmt(effPhEq, 2)),
+          h("span", { className: "mv" }, learned && learned.phEqFit != null ? fmt(learned.phEqFit, 2) : "\u2014"),
           h("input", { id: "s-pheq", type: "number", step: 0.1, inputMode: "decimal", placeholder: "auto", value: config.phEq, onChange: (e) => upd("phEq", e.target.value) })
         ),
-        h("p", { className: "p" }, effPhEqInfo.source === "override" ? `Equilibrium is overridden to ${fmt(effPhEq, 2)}; clear the field to use the chemistry prediction.` : effPhEqInfo.source === "predicted" ? `Equilibrium ${fmt(effPhEq, 2)} is predicted from open-system carbonate chemistry at your latest TA; enter a value to override.` : `Equilibrium is the default ${fmt(effPhEq, 2)} until a reading with pH and TA exists.`),
+        h("p", { className: "p" }, `Model is using CO\u2082 outgassing k = ${fmt(effPhK, 2)}/day (${learned && learned.phK != null ? `learned from ${learned.phIntervals} pH interval${learned.phIntervals === 1 ? "" : "s"}` : "fallback; the readings in the window could not pin a rate"}).`),
+        h("p", { className: "p" }, effPhEqInfo.source === "learned" ? `Equilibrium ${fmt(effPhEq, 2)} is fitted from your readings: pH plateaus below the ${fmt(effPhEqInfo.predicted, 2)} that atmospheric CO\u2082 alone would give (cover, weak aeration or bather CO\u2082 pull it down). Enter a value to override.` : effPhEqInfo.source === "override" ? `Equilibrium is overridden to ${fmt(effPhEq, 2)}; clear the field to use the chemistry prediction.` : effPhEqInfo.source === "predicted" ? `Equilibrium ${fmt(effPhEq, 2)} is predicted from open-system carbonate chemistry at your latest TA; enter a value to override.` : `Equilibrium is the default ${fmt(effPhEq, 2)} until a reading with pH and TA exists.`),
         h(
           "div",
           { className: "grid2", style: { borderTop: `1.33px solid ${C.g300}`, paddingTop: 10 } },
@@ -2200,9 +2212,9 @@ function(a,b,c){if(!Vd(b))throw Error(n(200));return Wd(null,a,b,!1,c)};Q.unmoun
         }
       }
     }
+    const PH_RES = 0.2;
     const msSorted = measurements.slice().sort((a, b) => tsOf(a) - tsOf(b));
-    const phMs = msSorted.filter((m) => m.ph != null);
-    let kSamples = [], phIntervals = 0;
+    const phMs = msSorted.filter((m) => m.ph != null && m.ph !== "" && isFinite(Number(m.ph)));
     const lastKnown = (key, t) => {
       let v = null;
       for (const m of msSorted) {
@@ -2211,6 +2223,7 @@ function(a,b,c){if(!Vd(b))throw Error(n(200));return Wd(null,a,b,!1,c)};Q.unmoun
       }
       return v;
     };
+    const intervals = [];
     for (let i = 1; i < phMs.length; i++) {
       const tPrev = tsOf(phMs[i - 1]), tCur = tsOf(phMs[i]);
       const hours = (tCur - tPrev) / HOUR;
@@ -2228,27 +2241,36 @@ function(a,b,c){if(!Vd(b))throw Error(n(200));return Wd(null,a,b,!1,c)};Q.unmoun
         st = applyDose(st, d.chem, d.oz, config.volume);
       });
       if (st.ta == null || !(st.ta > 0)) continue;
-      const phStart = st.ph, phEnd = Number(phMs[i].ph), days = hours / 24;
-      const eq = phEqOverride != null ? phEqOverride : phEquilibrium(st.ta, st.cya || 0, st.temp, st.ch);
-      if (eq == null) continue;
-      const dS = eq - phStart, dE = eq - phEnd;
-      if (!(dS * dE > 0) || Math.abs(dE) > Math.abs(dS) || Math.abs(dS) < 0.03) continue;
-      const sgn = dS > 0 ? 1 : -1;
-      const g = (kg2) => sgn * (outgasPH(phStart, st.ta, st.cya || 0, days, kg2, st.temp, st.ch, phEqOverride) - phEnd);
-      let lo = 0, hi = 6;
-      if (g(hi) < 0) continue;
-      for (let it = 0; it < 40; it++) {
-        const mid = (lo + hi) / 2;
-        if (g(mid) < 0) lo = mid;
-        else hi = mid;
+      intervals.push({ phStart: st.ph, phEnd: Number(phMs[i].ph), days: hours / 24, ta: st.ta, cya: st.cya || 0, ch: st.ch, temp: st.temp });
+    }
+    const phIntervals = intervals.length;
+    let dynPhK = null, phEqFit = null;
+    if (intervals.length >= 2) {
+      const half = PH_RES / 2;
+      const last = intervals[intervals.length - 1];
+      const eqPred = phEquilibrium(last.ta, last.cya, last.temp, last.ch);
+      const misfit = (kg, eq) => intervals.reduce((acc, iv) => {
+        const r = Math.abs(outgasPH(iv.phStart, iv.ta, iv.cya, iv.days, kg, iv.temp, iv.ch, eq) - iv.phEnd);
+        const e = Math.max(0, r - half);
+        return acc + (e <= PH_RES ? e * e : PH_RES * (2 * e - PH_RES));
+      }, 0);
+      const K_PRIOR = 0.3, K_W = 4e-3, EQ_W = 0.15;
+      const kGrid = [];
+      for (let g = Math.log(0.01); g <= Math.log(6) + 1e-9; g += (Math.log(6) - Math.log(0.01)) / 40) kGrid.push(Math.exp(g));
+      const eqGrid = [];
+      if (phEqOverride != null) eqGrid.push(phEqOverride);
+      else if (eqPred != null) for (let e = 7.5; e <= eqPred + 1e-9; e += 0.05) eqGrid.push(Math.min(e, eqPred));
+      if (eqGrid[eqGrid.length - 1] !== eqPred && phEqOverride == null && eqPred != null) eqGrid.push(eqPred);
+      let best = null;
+      for (const eq of eqGrid) for (const kg of kGrid) {
+        const L = misfit(kg, eq) + K_W * Math.pow(Math.log(kg / K_PRIOR), 2) + (phEqOverride == null ? EQ_W * Math.pow(eq - eqPred, 2) : 0);
+        if (Number.isFinite(L) && (best == null || L < best.L)) best = { L, kg, eq };
       }
-      const kg = (lo + hi) / 2;
-      if (isFinite(kg) && kg >= 0) {
-        kSamples.push(kg);
-        phIntervals++;
+      if (best) {
+        dynPhK = Math.max(0, Math.min(6, best.kg));
+        if (phEqOverride == null && Math.abs(best.eq - eqPred) > 0.025) phEqFit = best.eq;
       }
     }
-    const dynPhK = kSamples.length ? Math.max(0, Math.min(6, kSamples.reduce((a, b) => a + b, 0) / kSamples.length)) : null;
     if (totalLoss == null && dynPhK == null) return null;
     return {
       totalLoss,
@@ -2258,6 +2280,7 @@ function(a,b,c){if(!Vd(b))throw Error(n(200));return Wd(null,a,b,!1,c)};Q.unmoun
       frac: dynFrac,
       avgFC,
       phK: dynPhK,
+      phEqFit,
       phIntervals,
       phEq
     };
@@ -2951,12 +2974,14 @@ function(a,b,c){if(!Vd(b))throw Error(n(200));return Wd(null,a,b,!1,c)};Q.unmoun
       }
     }, [config, measurements, doses, loaded]);
     const effPhEqInfo = useMemo(() => computePhEqInfo({ config, measurements }), [config.phEq, config.temp, measurements]);
-    const effPhEq = effPhEqInfo.value;
-    const phEqOverride = effPhEqInfo.source === "override" ? effPhEqInfo.value : null;
+    const phEqManual = effPhEqInfo.source === "override" ? effPhEqInfo.value : null;
     const lastTemp = useMemo(() => computeLastTemp({ measurements, config }), [measurements, config.temp]);
-    const learned = useMemo(() => computeLearned({ measurements, doses, config, effPhEq, phEqOverride }), [measurements, doses, config.volume, config.lossWindow, config.temp, effPhEq, phEqOverride]);
-    const effFrac = learned && learned.frac != null ? learned.frac : config.rSun || 0.45;
-    const effPhK = learned && learned.phK != null ? learned.phK : config.phK || 0.55;
+    const learned = useMemo(() => computeLearned({ measurements, doses, config, effPhEq: effPhEqInfo.value, phEqOverride: phEqManual }), [measurements, doses, config.volume, config.lossWindow, config.temp, effPhEqInfo.value, phEqManual]);
+    const phEqOverride = phEqManual != null ? phEqManual : learned && Number.isFinite(learned.phEqFit) ? learned.phEqFit : null;
+    const effPhEq = phEqOverride != null ? phEqOverride : effPhEqInfo.value;
+    const effPhEqSource = phEqManual != null ? "override" : learned && Number.isFinite(learned.phEqFit) ? "learned" : effPhEqInfo.source;
+    const effFrac = learned && Number.isFinite(learned.frac) ? learned.frac : Number(config.rSun) || 0.45;
+    const effPhK = learned && Number.isFinite(learned.phK) ? learned.phK : Number(config.phK) || 0.55;
     const series = useMemo(() => computeSeries({ measurements, doses, config, effFrac, effPhK, effPhEq, phEqOverride }), [measurements, doses, config, effFrac, effPhK, effPhEq, phEqOverride]);
     const latest = useMemo(() => computeLatest({ series, config, effFrac, effPhK, effPhEq, phEqOverride, lastTemp }), [series, effFrac, effPhK, effPhEq, phEqOverride, lastTemp, config.temp, config.sunStart, config.sunEnd]);
     const chartSeries = useMemo(() => computeChartSeries({ series, config }), [series, config.chartDaysBack, config.chartDaysFwd]);
@@ -3007,7 +3032,8 @@ function(a,b,c){if(!Vd(b))throw Error(n(200));return Wd(null,a,b,!1,c)};Q.unmoun
       };
     }, [loaded]);
     if (!loaded) return h(Splash, { out: false, name: config.name });
-    const shared = { config, latest, series, chartSeries, forecast, learned, effFrac, effPhK, effPhEq, effPhEqInfo, plan, advice, effectOf, logDoseNow, curTemp, lastMeasTs, setTab, setFocus, focus };
+    const effPhEqView = { value: effPhEq, source: effPhEqSource, predicted: effPhEqInfo.value };
+    const shared = { config, latest, series, chartSeries, forecast, learned, effFrac, effPhK, effPhEq, effPhEqInfo: effPhEqView, plan, advice, effectOf, logDoseNow, curTemp, lastMeasTs, setTab, setFocus, focus };
     return h(
       "div",
       { className: "app" },
@@ -3020,8 +3046,9 @@ function(a,b,c){if(!Vd(b))throw Error(n(200));return Wd(null,a,b,!1,c)};Q.unmoun
         config,
         setConfig,
         learned,
+        effPhK,
         effPhEq,
-        effPhEqInfo,
+        effPhEqInfo: effPhEqView,
         syncStatus,
         exportCSV: exportCSV2,
         latestCya: latest ? latest.cya : null,
