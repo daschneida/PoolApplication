@@ -3,6 +3,7 @@ import { C } from "./theme.js";
 import { Card, CardHead } from "./pieces.js";
 import { splitPastFuture, SmartDot, ChemTooltip } from "./charts.js";
 import { PARAMS } from "../chem/additives.js";
+import { MS_DAY } from "../chem/time.js";
 import { fmt, fmtVal, fmtDT, fmtMD, numOrDef, rangeOf } from "../util.js";
 
 /* ===================== TRENDS ===================== */
@@ -11,6 +12,15 @@ export function Trends({ config, setConfig, chartSeries, series, focus, setFocus
   const r = rangeOf(config, focus);
   const [pinned, setPinned] = useState(null);
   const data = useMemo(() => splitPastFuture(chartSeries, focus), [chartSeries, focus]);
+  // one tick per N days at local midnight so labels never pile up on a phone
+  const dayTicks = useMemo(() => {
+    if (!chartSeries.length) return [];
+    const t0 = chartSeries[0].t, t1 = chartSeries[chartSeries.length - 1].t;
+    const spanDays = (t1 - t0) / MS_DAY, step = Math.max(1, Math.ceil(spanDays / 5));
+    const d = new Date(t0); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() + 1);
+    const out = []; for (let t = d.getTime(); t <= t1; t += step * MS_DAY) out.push(t);
+    return out;
+  }, [chartSeries]);
   const measuredPts = chartSeries.filter(s => s._meas && s._meas[focus]);
   const back = numOrDef(config.chartDaysBack, 21);
   const setBack = d => setConfig({ ...config, chartDaysBack: d });
@@ -40,7 +50,7 @@ export function Trends({ config, setConfig, chartSeries, series, focus, setFocus
       data.length ? h(ResponsiveContainer, { width: "100%", height: 300 },
         h(LineChart, { data, margin: { top: 8, right: 8, bottom: 4, left: -16 }, onClick: e => { if (e && e.activePayload && e.activePayload.length) setPinned(e.activePayload[0].payload); } },
           h(CartesianGrid, { stroke: C.g300, vertical: false }),
-          h(XAxis, { dataKey: "t", type: "number", scale: "time", domain: ["dataMin", "dataMax"], tick: { fontSize: 11, fill: C.ink }, tickFormatter: fmtMD, minTickGap: 40 }),
+          h(XAxis, { dataKey: "t", type: "number", scale: "time", domain: ["dataMin", "dataMax"], ticks: dayTicks, tick: { fontSize: 11, fill: C.ink }, tickFormatter: fmtMD, interval: 0 }),
           h(YAxis, { tick: { fontSize: 11, fill: C.ink }, domain: ["auto", "auto"], width: 48 }),
           h(Tooltip, { content: h(ChemTooltip, { param: p }) }),
           h(ReferenceArea, { y1: r.lo, y2: r.hi, fill: C.mint, fillOpacity: 0.35 }),
