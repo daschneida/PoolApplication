@@ -141,8 +141,10 @@ export function App() {
   const learned = useMemo(() => computeLearned({ measurements, doses, config, effPhEq, phEqOverride }), [measurements, doses, config.volume, config.lossWindow, config.temp, effPhEq, phEqOverride]);
 
   // Forecast parameters: dynamic when available, else the Settings fallback.
-  const effFrac = learned && learned.frac != null ? learned.frac : config.rSun || 0.45;
-  const effPhK = learned && learned.phK != null ? learned.phK : config.phK || 0.55;
+  // Effective model parameters: learned when finite, else the Settings fallback. Never NaN,
+  // because a NaN rate silently turns every drift step into "no change".
+  const effFrac = learned && Number.isFinite(learned.frac) ? learned.frac : Number(config.rSun) || 0.45;
+  const effPhK = learned && Number.isFinite(learned.phK) ? learned.phK : Number(config.phK) || 0.55;
   const series = useMemo(() => computeSeries({ measurements, doses, config, effFrac, effPhK, effPhEq, phEqOverride }), [measurements, doses, config, effFrac, effPhK, effPhEq, phEqOverride]);
 
   // "latest" = the current day's row (today), which now includes any measurement + additive
@@ -215,7 +217,7 @@ export function App() {
     tab === "log" && h(LogTab, { ...shared, measurements, setMeasurements, doses, setDoses }),
     tab === "advisor" && h(Advisor, { measurements, latest, config, learned, effFrac, plan, advice, effectOf, logDoseNow, curTemp, effPhEq, effPhK }),
     tab === "settings" && h(Settings, {
-      config, setConfig, learned, effPhEq, effPhEqInfo, syncStatus, exportCSV,
+      config, setConfig, learned, effPhK, effPhEq, effPhEqInfo, syncStatus, exportCSV,
       latestCya: latest ? latest.cya : null,
       counts: { m: measurements.length, d: doses.length },
       onReset: () => { setMeasurements([]); setDoses([]); },
