@@ -5,7 +5,7 @@ import { Trends } from "./trends.js";
 import { LogTab } from "./log.js";
 import { Advisor } from "./advisor.js";
 import { Settings } from "./settings.js";
-import { ADDITIVES } from "../chem/additives.js";
+import { ADDITIVES, registerCustomAdditives } from "../chem/additives.js";
 import { MS_DAY, tsOf, nowLocalDTs } from "../chem/time.js";
 import { csi } from "../chem/csi.js";
 import { sunDays } from "../chem/sun.js";
@@ -46,6 +46,7 @@ export function App() {
     sunEnd: 17,
     sunRamp: 1,
     clStepOz: 64,
+    customAdditives: [],
     acidDefaultOz: 43
   });
   const [measurements, setMeasurements] = useState([]);
@@ -133,6 +134,8 @@ export function App() {
     }
   }, [config, measurements, doses, loaded]);
   // pH equilibrium: manual override if set, else predicted from chemistry of latest reading.
+  // User-defined additives must be registered before anything below reads ADDITIVES.
+  useMemo(() => registerCustomAdditives(config.customAdditives), [config.customAdditives]);
   const effPhEqInfo = useMemo(() => computePhEqInfo({ config, measurements }), [config.phEq, config.temp, measurements]);
   const phEqManual = effPhEqInfo.source === "override" ? effPhEqInfo.value : null;
   const lastTemp = useMemo(() => computeLastTemp({ measurements, config }), [measurements, config.temp]);

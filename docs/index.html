@@ -95,6 +95,8 @@
   .lt-grid, .grid3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
   .grid2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
   .grid5 { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; }
+  .grid4 { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+  .custom-add { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; background: var(--g100); border-radius: var(--rs); }
   .grid5 > div { display: flex; flex-direction: column; gap: 2px; font-size: 12px; }
   .grid5 b { font-size: 16px; }
   .lt-card { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; padding: 12px; border: var(--rule); background: #fff; text-align: left; border-radius: var(--rs); }
@@ -608,6 +610,18 @@ function(a,b,c){if(!Vd(b))throw Error(n(200));return Wd(null,a,b,!1,c)};Q.unmoun
       CH: 6754,
       unit: "oz"
     },
+    // 98 % cyanuric acid (granular, by weight): 28.35 g x 0.98 / 3.785 L per gal = 7340 ppm·gal/oz.
+    // Check: 1 lb in 10,000 gal raises CYA by 11.7 ppm, matching the usual label figure of ~12.
+    // Dissolves over a day or two; the model applies it at the logged time. Its acidity is
+    // handled by the carbonate system (CYA added at constant total alkalinity lowers pH).
+    "Cyanuric acid (98%)": {
+      Cl: 0,
+      CYA: 7340,
+      TA: 0,
+      pH: 0,
+      CH: 0,
+      unit: "oz"
+    },
     "Sodium Bicarbonate": {
       Cl: 0,
       CYA: 0,
@@ -674,6 +688,24 @@ function(a,b,c){if(!Vd(b))throw Error(n(200));return Wd(null,a,b,!1,c)};Q.unmoun
     return d > 0 ? d : 43;
   };
   var CL_STEPS = { "Trichlor": [8, 16, 24], "Ca(OCl)2 (73 wt%)": [16, 32, 48] };
+  var CUSTOM_KEYS = /* @__PURE__ */ new Set();
+  var num0 = (v) => {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : 0;
+  };
+  function registerCustomAdditives(list) {
+    for (const k of CUSTOM_KEYS) delete ADDITIVES[k];
+    CUSTOM_KEYS.clear();
+    (Array.isArray(list) ? list : []).forEach((c) => {
+      if (!c || c.name == null) return;
+      const name = String(c.name).trim();
+      if (!name || name in ADDITIVES) return;
+      const p = c.per10k || {};
+      ADDITIVES[name] = { Cl: num0(p.fc) * 1e4, CYA: num0(p.cya) * 1e4, TA: num0(p.ta) * 1e4, pH: 0, CH: num0(p.ch) * 1e4, unit: c.unit === "fl oz" ? "fl oz" : "oz", custom: true };
+      CUSTOM_KEYS.add(name);
+    });
+    return ADDITIVES;
+  }
 
   // src/ui/theme.js
   var C = {
@@ -1726,7 +1758,7 @@ function(a,b,c){if(!Vd(b))throw Error(n(200));return Wd(null,a,b,!1,c)};Q.unmoun
           "div",
           { className: "grid2" },
           h("div", { className: "field" }, h("label", { htmlFor: "d-chem" }, "Chemical"), h("select", { id: "d-chem", value: dForm.chem, onChange: (e) => setDForm({ ...dForm, chem: e.target.value }) }, Object.keys(ADDITIVES).map((k) => h("option", { key: k, value: k }, k)))),
-          h("div", { className: "field" }, h("label", { htmlFor: "d-oz" }, `Amount (${ADDITIVES[dForm.chem].unit})`), h("input", { id: "d-oz", type: "number", step: "any", inputMode: "decimal", value: dForm.oz, onChange: (e) => setDForm({ ...dForm, oz: e.target.value }) }))
+          h("div", { className: "field" }, h("label", { htmlFor: "d-oz" }, `Amount (${ADDITIVES[dForm.chem].unit === "oz" ? "oz by weight" : ADDITIVES[dForm.chem].unit})`), h("input", { id: "d-oz", type: "number", step: "any", inputMode: "decimal", value: dForm.oz, onChange: (e) => setDForm({ ...dForm, oz: e.target.value }) }))
         ),
         h(
           "div",
@@ -2021,6 +2053,8 @@ function(a,b,c){if(!Vd(b))throw Error(n(200));return Wd(null,a,b,!1,c)};Q.unmoun
       h("input", { type: "number", step, inputMode: "decimal", "aria-label": label + " low", value: config[loK], onChange: (e) => upd(loK, e.target.value) }),
       h("input", { type: "number", step, inputMode: "decimal", "aria-label": label + " high", value: config[hiK], onChange: (e) => upd(hiK, e.target.value) })
     );
+    const customs = Array.isArray(config.customAdditives) ? config.customAdditives : [];
+    const updCustom = (i, patch) => setConfig({ ...config, customAdditives: customs.map((c, j) => j === i ? { ...c, ...patch } : c) });
     const canSuggest = latestCya != null && !isNaN(latestCya) && latestCya > 0;
     const suggestFC = () => {
       if (!canSuggest) return;
@@ -2052,6 +2086,34 @@ function(a,b,c){if(!Vd(b))throw Error(n(200));return Wd(null,a,b,!1,c)};Q.unmoun
           num("s-jug", "Chlorine pour step (fl oz)", "clStepOz", 1, { color: colorOf("fc"), ph: "64", hint: "NaOCl 10.5% is dosed in multiples of this" }),
           num("s-acid", "Acid default (fl oz)", "acidDefaultOz", 1, { color: colorOf("ph"), ph: "43", hint: `muriatic 31%; stepper offers ${acidStepsFor(config).join(" \xB7 ")}, the largest is the cap` })
         )
+      ),
+      h(
+        Card,
+        null,
+        h(CardHead, { title: "Additives", sub: "built-ins from the spreadsheet, plus your own" }),
+        h("p", { className: "p" }, `Built in: ${Object.keys(ADDITIVES).filter((k) => !ADDITIVES[k].custom).join(", ")}.`),
+        ...customs.map((c, i) => h(
+          "div",
+          { key: i, className: "custom-add" },
+          h(
+            "div",
+            { className: "grid2" },
+            h("div", { className: "field" }, h("label", { htmlFor: `ca-name-${i}` }, "Name"), h("input", { id: `ca-name-${i}`, type: "text", value: c.name || "", placeholder: "e.g. Borax (20 Mule Team)", onChange: (e) => updCustom(i, { name: e.target.value }) })),
+            h("div", { className: "field" }, h("label", { htmlFor: `ca-unit-${i}` }, "Unit"), h("select", { id: `ca-unit-${i}`, value: c.unit === "fl oz" ? "fl oz" : "oz", onChange: (e) => updCustom(i, { unit: e.target.value }) }, h("option", { value: "oz" }, "oz (weight)"), h("option", { value: "fl oz" }, "fl oz (liquid)")))
+          ),
+          h("div", { className: "sect-k" }, "ppm change from 1 unit in a 10,000 gal pool"),
+          h("div", { className: "grid4" }, [["fc", "FC", colorOf("fc")], ["cya", "CYA", colorOf("cya")], ["ta", "TA", colorOf("ta")], ["ch", "CH", colorOf("ch")]].map(([k, l, col]) => h("div", { key: k, className: "field" }, h("label", { htmlFor: `ca-${k}-${i}`, style: { color: col } }, l), h("input", { id: `ca-${k}-${i}`, type: "number", step: "any", inputMode: "decimal", value: (c.per10k || {})[k] ?? "", placeholder: "0", onChange: (e) => updCustom(i, { per10k: { ...c.per10k || {}, [k]: e.target.value } }) })))),
+          h(
+            "div",
+            { className: "row-between" },
+            h("span", { className: "hint" }, c.name && (c.per10k || {}) ? `In your pool: ${Object.entries(c.per10k || {}).filter(([, v]) => Number(v)).map(([k, v]) => `${k.toUpperCase()} ${fmt(Number(v) * 1e4 / (Number(config.volume) || 19e3), 2)} ppm per ${c.unit === "fl oz" ? "fl oz" : "oz"}`).join(" \xB7 ") || "no effect entered"}` : ""),
+            h("button", { type: "button", className: "btn-ghost sm", style: { borderColor: C.red, color: C.red }, onClick: () => {
+              if (confirm(`Remove ${c.name || "this additive"}? Doses already logged with it stay in the history but stop affecting the model.`)) setConfig({ ...config, customAdditives: customs.filter((_, j) => j !== i) });
+            } }, "Remove")
+          )
+        )),
+        h("button", { type: "button", className: "btn-ghost full", onClick: () => setConfig({ ...config, customAdditives: [...customs, { name: "", unit: "oz", per10k: { fc: "", cya: "", ta: "", ch: "" } }] }) }, "Add an additive"),
+        h("p", { className: "hint" }, "Read the label: if it says 1 lb raises CYA by 12 ppm in 10,000 gal, enter 12 \xF7 16 = 0.75 in CYA for a 1 oz unit. Acids and bases go in as their TA change; the carbonate model works out pH. Names must differ from the built-ins.")
       ),
       h(
         Card,
@@ -2252,9 +2314,10 @@ function(a,b,c){if(!Vd(b))throw Error(n(200));return Wd(null,a,b,!1,c)};Q.unmoun
       const misfit = (kg, eq) => intervals.reduce((acc, iv) => {
         const r = Math.abs(outgasPH(iv.phStart, iv.ta, iv.cya, iv.days, kg, iv.temp, iv.ch, eq) - iv.phEnd);
         const e = Math.max(0, r - half);
-        return acc + (e <= PH_RES ? e * e : PH_RES * (2 * e - PH_RES));
+        const cap = 2 * PH_RES;
+        return acc + (e <= PH_RES ? e * e : PH_RES * (2 * Math.min(e, cap) - PH_RES));
       }, 0);
-      const K_PRIOR = 0.3, K_W = 4e-3, EQ_W = 0.15;
+      const K_PRIOR = 0.3, K_W = 0.02, EQ_W = 0.15;
       const kGrid = [];
       for (let g = Math.log(0.01); g <= Math.log(6) + 1e-9; g += (Math.log(6) - Math.log(0.01)) / 40) kGrid.push(Math.exp(g));
       const eqGrid = [];
@@ -2891,6 +2954,7 @@ function(a,b,c){if(!Vd(b))throw Error(n(200));return Wd(null,a,b,!1,c)};Q.unmoun
       sunEnd: 17,
       sunRamp: 1,
       clStepOz: 64,
+      customAdditives: [],
       acidDefaultOz: 43
     });
     const [measurements, setMeasurements] = useState([]);
@@ -2973,6 +3037,7 @@ function(a,b,c){if(!Vd(b))throw Error(n(200));return Wd(null,a,b,!1,c)};Q.unmoun
         return () => clearTimeout(id);
       }
     }, [config, measurements, doses, loaded]);
+    useMemo(() => registerCustomAdditives(config.customAdditives), [config.customAdditives]);
     const effPhEqInfo = useMemo(() => computePhEqInfo({ config, measurements }), [config.phEq, config.temp, measurements]);
     const phEqManual = effPhEqInfo.source === "override" ? effPhEqInfo.value : null;
     const lastTemp = useMemo(() => computeLastTemp({ measurements, config }), [measurements, config.temp]);

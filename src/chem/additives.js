@@ -97,6 +97,18 @@ export const ADDITIVES = {
     CH: 6754,
     unit: "oz"
   },
+  // 98 % cyanuric acid (granular, by weight): 28.35 g x 0.98 / 3.785 L per gal = 7340 ppm·gal/oz.
+  // Check: 1 lb in 10,000 gal raises CYA by 11.7 ppm, matching the usual label figure of ~12.
+  // Dissolves over a day or two; the model applies it at the logged time. Its acidity is
+  // handled by the carbonate system (CYA added at constant total alkalinity lowers pH).
+  "Cyanuric acid (98%)": {
+    Cl: 0,
+    CYA: 7340,
+    TA: 0,
+    pH: 0,
+    CH: 0,
+    unit: "oz"
+  },
   "Sodium Bicarbonate": {
     Cl: 0,
     CYA: 0,
@@ -156,3 +168,27 @@ export const ACID_BASE_STEPS = [32, 43, 64];
 export const acidStepsFor = config => { const d = Number(config.acidDefaultOz); const arr = ACID_BASE_STEPS.slice(); if (d > 0 && !arr.includes(d)) arr.push(d); return arr.sort((a, b) => a - b); };
 export const acidDefaultFor = config => { const d = Number(config.acidDefaultOz); return d > 0 ? d : 43; };
 export const CL_STEPS = { "Trichlor": [8, 16, 24], "Ca(OCl)2 (73 wt%)": [16, 32, 48] };
+
+// ---------- user-defined additives (Settings → Additives) ----------
+// Stored in config.customAdditives as { name, unit: "oz" | "fl oz", per10k: { fc, cya, ta, ch } }
+// where per10k is the ppm change from ONE unit in a 10,000-gal pool, the figure most product
+// labels give. The spreadsheet convention used everywhere else is ppm·gal per unit, so the
+// coefficient is per10k x 10,000. Registered entries live in the same ADDITIVES map, so the
+// Log, the model and the history treat them like the built-ins. pH is left to the carbonate
+// system (enter the TA change for acids and bases).
+const CUSTOM_KEYS = new Set();
+const num0 = v => { const n = Number(v); return Number.isFinite(n) ? n : 0; };
+export function registerCustomAdditives(list) {
+  for (const k of CUSTOM_KEYS) delete ADDITIVES[k];
+  CUSTOM_KEYS.clear();
+  (Array.isArray(list) ? list : []).forEach(c => {
+    if (!c || c.name == null) return;
+    const name = String(c.name).trim();
+    if (!name || (name in ADDITIVES)) return; // built-in names cannot be shadowed
+    const p = c.per10k || {};
+    ADDITIVES[name] = { Cl: num0(p.fc) * 10000, CYA: num0(p.cya) * 10000, TA: num0(p.ta) * 10000, pH: 0, CH: num0(p.ch) * 10000, unit: c.unit === "fl oz" ? "fl oz" : "oz", custom: true };
+    CUSTOM_KEYS.add(name);
+  });
+  return ADDITIVES;
+}
+export const isCustomAdditive = name => CUSTOM_KEYS.has(name);

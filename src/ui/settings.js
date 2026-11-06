@@ -1,7 +1,7 @@
 import { h } from "./react.js";
 import { C, colorOf } from "./theme.js";
 import { Card, CardHead } from "./pieces.js";
-import { acidStepsFor } from "../chem/additives.js";
+import { ADDITIVES, acidStepsFor } from "../chem/additives.js";
 import { fmt, numOrDef } from "../util.js";
 import { SYNC_ON } from "../sync.js";
 
@@ -16,6 +16,8 @@ export function Settings({ config, setConfig, learned, effPhK, effPhEq, effPhEqI
     h("span", { style: { color, fontWeight: bold ? 700 : 400 } }, label),
     h("input", { type: "number", step, inputMode: "decimal", "aria-label": label + " low", value: config[loK], onChange: e => upd(loK, e.target.value) }),
     h("input", { type: "number", step, inputMode: "decimal", "aria-label": label + " high", value: config[hiK], onChange: e => upd(hiK, e.target.value) }));
+  const customs = Array.isArray(config.customAdditives) ? config.customAdditives : [];
+  const updCustom = (i, patch) => setConfig({ ...config, customAdditives: customs.map((c, j) => j === i ? { ...c, ...patch } : c) });
   const canSuggest = latestCya != null && !isNaN(latestCya) && latestCya > 0;
   const suggestFC = () => { if (!canSuggest) return; setConfig({ ...config, fcLo: Math.round(latestCya * 0.12 * 2) / 2, fcHi: Math.round(latestCya * 0.16 * 2) / 2 }); };
   const sunS = numOrDef(config.sunStart, 11), sunE = numOrDef(config.sunEnd, 17);
@@ -29,6 +31,20 @@ export function Settings({ config, setConfig, learned, effPhK, effPhEq, effPhEqI
       h("div", { className: "grid2" },
         num("s-jug", "Chlorine pour step (fl oz)", "clStepOz", 1, { color: colorOf("fc"), ph: "64", hint: "NaOCl 10.5% is dosed in multiples of this" }),
         num("s-acid", "Acid default (fl oz)", "acidDefaultOz", 1, { color: colorOf("ph"), ph: "43", hint: `muriatic 31%; stepper offers ${acidStepsFor(config).join(" · ")}, the largest is the cap` }))),
+    h(Card, null, h(CardHead, { title: "Additives", sub: "built-ins from the spreadsheet, plus your own" }),
+      h("p", { className: "p" }, `Built in: ${Object.keys(ADDITIVES).filter(k => !ADDITIVES[k].custom).join(", ")}.`),
+      ...customs.map((c, i) => h("div", { key: i, className: "custom-add" },
+        h("div", { className: "grid2" },
+          h("div", { className: "field" }, h("label", { htmlFor: `ca-name-${i}` }, "Name"), h("input", { id: `ca-name-${i}`, type: "text", value: c.name || "", placeholder: "e.g. Borax (20 Mule Team)", onChange: e => updCustom(i, { name: e.target.value }) })),
+          h("div", { className: "field" }, h("label", { htmlFor: `ca-unit-${i}` }, "Unit"), h("select", { id: `ca-unit-${i}`, value: c.unit === "fl oz" ? "fl oz" : "oz", onChange: e => updCustom(i, { unit: e.target.value }) }, h("option", { value: "oz" }, "oz (weight)"), h("option", { value: "fl oz" }, "fl oz (liquid)")))),
+        h("div", { className: "sect-k" }, "ppm change from 1 unit in a 10,000 gal pool"),
+        h("div", { className: "grid4" }, [["fc", "FC", colorOf("fc")], ["cya", "CYA", colorOf("cya")], ["ta", "TA", colorOf("ta")], ["ch", "CH", colorOf("ch")]].map(([k, l, col]) =>
+          h("div", { key: k, className: "field" }, h("label", { htmlFor: `ca-${k}-${i}`, style: { color: col } }, l), h("input", { id: `ca-${k}-${i}`, type: "number", step: "any", inputMode: "decimal", value: (c.per10k || {})[k] ?? "", placeholder: "0", onChange: e => updCustom(i, { per10k: { ...(c.per10k || {}), [k]: e.target.value } }) })))),
+        h("div", { className: "row-between" },
+          h("span", { className: "hint" }, c.name && (c.per10k || {}) ? `In your pool: ${Object.entries(c.per10k || {}).filter(([, v]) => Number(v)).map(([k, v]) => `${k.toUpperCase()} ${fmt(Number(v) * 10000 / (Number(config.volume) || 19000), 2)} ppm per ${c.unit === "fl oz" ? "fl oz" : "oz"}`).join(" · ") || "no effect entered"}` : ""),
+          h("button", { type: "button", className: "btn-ghost sm", style: { borderColor: C.red, color: C.red }, onClick: () => { if (confirm(`Remove ${c.name || "this additive"}? Doses already logged with it stay in the history but stop affecting the model.`)) setConfig({ ...config, customAdditives: customs.filter((_, j) => j !== i) }); } }, "Remove")))),
+      h("button", { type: "button", className: "btn-ghost full", onClick: () => setConfig({ ...config, customAdditives: [...customs, { name: "", unit: "oz", per10k: { fc: "", cya: "", ta: "", ch: "" } }] }) }, "Add an additive"),
+      h("p", { className: "hint" }, "Read the label: if it says 1 lb raises CYA by 12 ppm in 10,000 gal, enter 12 ÷ 16 = 0.75 in CYA for a 1 oz unit. Acids and bases go in as their TA change; the carbonate model works out pH. Names must differ from the built-ins.")),
     h(Card, null, h(CardHead, { title: "Target ranges", right: h("span", { className: "hint" }, "low · high") }),
       range("Free chlorine", "fcLo", "fcHi", 0.5, colorOf("fc"), true),
       h("div", { className: "trow sug" }, h("span", { className: "hint" }, canSuggest ? `CYA is ${fmt(latestCya, 0)} ppm → suggested FC ${fmt(latestCya * 0.12)}–${fmt(latestCya * 0.16)} (12–16% of CYA)` : "Log a CYA reading to get a chlorine range suggestion"), h("button", { type: "button", className: "btn-ghost sm", disabled: !canSuggest, onClick: suggestFC }, "Use")),

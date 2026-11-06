@@ -9,7 +9,7 @@ const base = { ta: 90, cya: 50, ch: 300, temp: 80 };
 test("pH rising a full kit step per day fits a clearly positive outgassing rate", () => {
   const m = [{ ts: ts(3), ph: 7.4, ...base }, { ts: ts(2), ph: 7.6 }, { ts: ts(1), ph: 7.8 }, { ts: ts(0), ph: 7.8 }];
   const r = computeLearned({ measurements: m, doses: [], config: cfg, effPhEq: 8.3, phEqOverride: null });
-  assert.ok(r.phK > 0.4 && r.phK < 1.5, `k=${r.phK}`);
+  assert.ok(r.phK > 0.25 && r.phK < 1.5, `k=${r.phK}`); // a 0.2 step per day only bounds k to roughly 0.25-0.8 at kit resolution
 });
 test("unchanged readings bound the rate from above instead of forcing it to zero", () => {
   const m = [{ ts: ts(3), ph: 7.6, ...base }, { ts: ts(2), ph: 7.6 }, { ts: ts(1), ph: 7.6 }, { ts: ts(0), ph: 7.6 }];

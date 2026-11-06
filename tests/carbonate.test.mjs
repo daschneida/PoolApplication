@@ -45,3 +45,10 @@ test("pH / DIC round trip", () => {
 test("CSI reference point", () => {
   near(csi(7.84, CH, 92, CYA, T), 0.32, 0.01, "csi");
 });
+
+test("98 % cyanuric acid: 1 lb in 10,000 gal raises CYA about 12 ppm and nudges pH down", () => {
+  const r = applyDose({ fc: 3, ph: 7.6, cya: 30, ta: 90, ch: 300, temp: 80 }, "Cyanuric acid (98%)", 16, 10000);
+  near(r.cya - 30, 11.7, 0.3, "dCYA");
+  assert.ok(r.ph < 7.6 && r.ph > 7.3, `pH ${r.ph}`); // cyanuric acid is a weak acid: ~0.08 meq/L released at this pH
+  assert.equal(r.ta, 90); // total alkalinity unchanged; carbonate share drops
+});

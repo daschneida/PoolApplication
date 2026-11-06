@@ -1,3 +1,4 @@
+import { ADDITIVES, registerCustomAdditives } from "../src/chem/additives.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { computePlan, computeAdvice } from "../src/engine/planner.js";
@@ -20,4 +21,11 @@ test("the advice engine returns a scored best plan with a do-nothing baseline", 
   assert.ok(adv.best && adv.none && adv.count > 1);
   assert.ok(adv.best.score <= adv.none.score);
   assert.ok(adv.best.doses.some(d => d.chem === "NaOCl (10.5 wt%)" && d.oz === 128));
+});
+
+test("custom additives register with ppm-per-10k-gal label figures and cannot shadow built-ins", () => {
+  registerCustomAdditives([{ name: "Borax", unit: "oz", per10k: { fc: 0, cya: 0, ta: 0.3, ch: 0 } }, { name: "Trichlor", unit: "oz", per10k: { fc: 99 } }]);
+  assert.equal(ADDITIVES["Borax"].TA, 3000); assert.equal(ADDITIVES["Borax"].custom, true);
+  assert.equal(ADDITIVES["Trichlor"].Cl, 6855);
+  registerCustomAdditives([]); assert.equal(ADDITIVES["Borax"], undefined);
 });

@@ -113,9 +113,12 @@ export function computeLearned({ measurements, doses, config, effPhEq, phEqOverr
     const misfit = (kg, eq) => intervals.reduce((acc, iv) => {
       const r = Math.abs(outgasPH(iv.phStart, iv.ta, iv.cya, iv.days, kg, iv.temp, iv.ch, eq) - iv.phEnd);
       const e = Math.max(0, r - half);
-      return acc + (e <= PH_RES ? e * e : PH_RES * (2 * e - PH_RES));
+      // quadratic inside one kit step, linear to two steps, then flat: a reading no rate can
+      // explain (logged before a same-day dose, rain, kit error) stops pulling on the fit
+      const cap = 2 * PH_RES;
+      return acc + (e <= PH_RES ? e * e : PH_RES * (2 * Math.min(e, cap) - PH_RES));
     }, 0);
-    const K_PRIOR = 0.3, K_W = 0.004, EQ_W = 0.15;
+    const K_PRIOR = 0.3, K_W = 0.02, EQ_W = 0.15;
     const kGrid = [];
     for (let g = Math.log(0.01); g <= Math.log(6) + 1e-9; g += (Math.log(6) - Math.log(0.01)) / 40) kGrid.push(Math.exp(g));
     const eqGrid = [];

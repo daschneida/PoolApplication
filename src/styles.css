@@ -80,6 +80,8 @@
   .lt-grid, .grid3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
   .grid2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
   .grid5 { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; }
+  .grid4 { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+  .custom-add { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; background: var(--g100); border-radius: var(--rs); }
   .grid5 > div { display: flex; flex-direction: column; gap: 2px; font-size: 12px; }
   .grid5 b { font-size: 16px; }
   .lt-card { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; padding: 12px; border: var(--rule); background: #fff; text-align: left; border-radius: var(--rs); }
