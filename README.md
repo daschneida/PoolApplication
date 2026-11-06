@@ -73,9 +73,15 @@ npm run check      # lint (no-undef catches missing imports), tests, build
   (`sunDays`); overnight contributes nothing. CYA, TA, CH carry forward.
 - pH follows the carbonate system. Acid, bicarbonate, trichlor and dichlor change alkalinity
   stoichiometrically with dissolved inorganic carbon conserved; pH is re-solved from the full
-  alkalinity equation. Drift is first-order CO₂ outgassing toward 425 µatm at constant
-  alkalinity; the rate `k` (1/day) is learned per interval between pH readings, skipping
-  intervals no rate can explain. Equilibrium pH can be overridden in Settings.
+  alkalinity equation. Drift is first-order CO₂ outgassing at constant alkalinity toward an
+  effective equilibrium pH, which never exceeds the 425 µatm atmospheric value (covers, bather
+  CO₂ and weak aeration only pull it down).
+- The outgassing rate `k` (1/day) and that effective equilibrium are fitted jointly over every
+  interval between pH readings in the window (at least two intervals with a TA reading;
+  gaps over 21 days are skipped). Misses within ±0.1 pH (half a kit step) count as zero; the
+  loss is quadratic to one kit step, linear to two, then flat, so a reading no rate can explain
+  stops pulling on the fit. Mild priors pull `k` toward 0.3/day and the equilibrium toward the
+  atmospheric prediction. An equilibrium override in Settings fixes it and only `k` is fitted.
 - CSI is the TroubleFreePool form; the same cyanurate and ionic-strength terms feed the
   carbonate model so both agree on carbonate alkalinity.
 - Timestamps are stored to the second; equal stamps resolve dose → measurement → model.

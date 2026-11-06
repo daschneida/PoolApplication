@@ -13,14 +13,16 @@ unchanged from v1 so existing data loads. Vendored React/Recharts are not edited
 
 **Model.** Sun-window FC decay with a learned fraction; carbonate-system pH (alkalinity + DIC,
 Plummer & Busenberg constants, Davies corrections, TFP cyanurate term) for acid, bicarb,
-trichlor and CO₂ outgassing with a learned rate; TFP CSI. Tests in `tests/` pin hand-checked
+trichlor and CO₂ outgassing, with the rate and an effective equilibrium pH fitted jointly to
+the owner's readings (0.2 kit-step deadband, capped loss, mild priors); TFP CSI. Tests in `tests/` pin hand-checked
 numbers against the owner's spreadsheet. The owner wants honest modeling, real citations and
 explicit callouts of limitations; prefer calibrating to his readings over guessing.
 
 **Dosing rules (owner's).** Chlorine: fewest 64 fl oz pours reaching the top of the FC range,
 suggested when FC is below range or the forecast crosses the low bound in the chart window;
 overshoot accepted. Acid (31 % muriatic): only while pH > range high, default 43 fl oz (typed in
-Settings), steps 32 · 43 · 64, cap 64. Tap-to-log writes doses to the second with an undo.
+Settings), steps 32 · 43 · 64 plus the typed default; the largest step is the per-dose cap
+(64 unless a larger default is typed). Tap-to-log writes doses to the second with an undo.
 The planner (engine/planner.js) simulates container-sized plans and may prefer another acid step
 with a stated reason. No rain/dilution modeling by request.
 
