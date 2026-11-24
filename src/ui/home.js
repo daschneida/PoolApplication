@@ -12,18 +12,21 @@ import { summaryLine, doseLabel } from "../engine/planner.js";
 /* ===================== HOME ===================== */
 export function Home({ config, latest, series, forecast, learned, effFrac, effPhK, effPhEq, effPhEqInfo, plan, advice, effectOf, logDoseNow, curTemp, lastMeasTs, setTab, setFocus }) {
   const fcR = rangeOf(config, "fc"), phR = rangeOf(config, "ph"), csiR = rangeOf(config, "csi");
-  // The planner's picks seed the steppers; the crossing rule and the pH ceiling decide
-  // whether a box is shown at all, so a box can appear with the planner advising to wait.
+  // A dose box shows only when the house rule calls for that chemical today (plan.cl: FC below
+  // the low bound now or by this time tomorrow; plan.acid: pH above the ceiling) AND the
+  // planner's best plan includes it. Otherwise the card says "Nothing to add today" and why.
+  // The planner's picks seed the steppers.
   const jug = Math.max(1, numOrDef(config.clStepOz, 64));
   const bestCl = advice ? advice.best.doses.find(d => ADDITIVES[d.chem].Cl > 0) || null : null;
   const bestAcid = advice ? advice.best.doses.find(d => d.chem === ACID_CHEM) || null : null;
+  const showCl = !!(plan.cl && (!advice || bestCl));
+  const showAcid = !!(plan.acid && (!advice || bestAcid));
   const clChem = bestCl ? bestCl.chem : CL_CHEM;
   const clSeed = bestCl ? bestCl.oz : plan.cl ? plan.cl.defaultOz : jug;
   const [clOz, setClOz] = useState(clSeed);
   const [acidOz, setAcidOz] = useState(bestAcid ? bestAcid.oz : plan.acid ? plan.acid.defaultOz : 43);
   useEffect(() => { setClOz(clSeed); }, [clSeed, bestCl && bestCl.chem]);
   useEffect(() => { setAcidOz(bestAcid ? bestAcid.oz : plan.acid ? plan.acid.defaultOz : 43); }, [bestAcid && bestAcid.oz, plan.acid && plan.acid.defaultOz]);
-  const showCl = !!(plan.cl || bestCl);
   const planLine = advice ? `Planner, ${advice.days} days: ${advice.best.doses.length ? advice.best.doses.map(doseLabel).join(" + ") : "add nothing"} → ${summaryLine(advice.best.summary)}.` : null;
 
   if (!latest) return h("div", { className: "page" },
@@ -72,8 +75,26 @@ export function Home({ config, latest, series, forecast, learned, effFrac, effPh
   const phFloor = latest.ta != null && latest.ch != null && latest.cya != null ? phForCSI(csiR.lo, latest.ch, latest.ta, latest.cya, curTemp) : null;
 
   const clEff = showCl ? effectOf(clChem, clOz) : null;
-  const acEff = plan.acid ? effectOf(plan.acid.chem, acidOz) : null;
-  const defAcidEff = plan.acid && bestAcid && bestAcid.oz !== plan.acid.defaultOz ? effectOf(plan.acid.chem, plan.acid.defaultOz) : null;
+  const acEff = showAcid ? effectOf(plan.acid.chem, acidOz) : null;
+  const defAcidEff = showAcid && bestAcid && bestAcid.oz !== plan.acid.defaultOz ? effectOf(plan.acid.chem, plan.acid.defaultOz) : null;
+
+  // "Nothing to add today" text for each card, with the reason.
+  const dayName = t => new Date(t).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
+  // When the planner overrides the house rule its best plan already leaves that chemical out.
+  const plannerSays = planLine ? ` ${planLine}` : "";
+  const quiet = (text, lead) => h("div", { className: "allgood" }, lead ? h("b", null, "Nothing to add today. ") : null, text);
+  const clQuiet = latest.fc == null ? quiet("No FC reading yet.", false)
+    : quiet(plan.cl ? `FC ${latest.fc < fcR.lo ? `is below ${fcR.lo} ppm` : `drops below ${fcR.lo} ppm by this time tomorrow`}, but the planner would wait.${plannerSays}`
+      : plan.clNext ? `FC stays above ${fcR.lo} ppm until about ${dayName(plan.clNext.t)} (${daysPhrase(plan.clNext)}). Home calls for a pour once that is less than a day away.`
+      : `FC stays above ${fcR.lo} ppm through the ${config.chartDaysFwd || 7}-day forecast.`, true);
+  const waitAcidEff = plan.acid && !showAcid ? effectOf(plan.acid.chem, plan.acid.defaultOz) : null;
+  const acidWhy = !waitAcidEff ? ""
+    : waitAcidEff.csiNow != null && waitAcidEff.csiNow < csiR.lo ? `: ${plan.acid.defaultOz} fl oz would take CSI to ${fmtVal("csi", waitAcidEff.csiNow)}, under ${fmtVal("csi", csiR.lo)}`
+    : waitAcidEff.ph != null && waitAcidEff.ph < phR.lo ? `: ${plan.acid.defaultOz} fl oz would take pH to ${fmt(waitAcidEff.ph, 2)}, under ${phR.lo}`
+    : "";
+  const acQuiet = latest.ph == null ? quiet("No pH reading yet.", false)
+    : quiet(plan.acid ? `pH ${fmt(latest.ph, 2)} is above ${phR.hi}, but the planner would wait${acidWhy}.${plannerSays}`
+      : `No acid while pH is at or below ${phR.hi}.`, true);
 
   // CSI
   const csiWord = c => c == null ? "need all five inputs" : c <= -0.6 ? "corrosive" : c <= -0.3 ? "slightly corrosive" : c < 0.3 ? "balanced" : c < 0.6 ? "slightly scaling" : "scaling";
@@ -100,11 +121,11 @@ export function Home({ config, latest, series, forecast, learned, effFrac, effPh
       showCl && clEff ? h(DoseBox, {
         title: `Add today · ${clChem}`, chem: clChem, oz: clOz, step: clChem === CL_CHEM ? jug : undefined, steps: CL_STEPS[clChem], onChange: setClOz,
         lines: [`${fmt(latest.fc)} → ${fmt(clEff.fc)} ppm now; about ${fmt(clEff.fc1)} ppm this time tomorrow${clChem !== CL_CHEM && clEff.cya != null && latest.cya != null && clEff.cya !== latest.cya ? ` · CYA ${fmt(latest.cya, 0)} → ${fmt(clEff.cya, 0)}` : ""}${clChem !== CL_CHEM && clEff.ch != null && latest.ch != null && clEff.ch !== latest.ch ? ` · CH ${fmt(latest.ch, 0)} → ${fmt(clEff.ch, 0)}` : ""}.`,
-          plan.cl ? (plan.cl.crossing.days > 0 ? `Without it FC crosses ${fcR.lo} ppm ${daysPhrase(plan.cl.crossing)}.` : `FC is already below ${fcR.lo} ppm.`) : null,
-          !bestCl ? `The planner would wait: ${summaryLine(advice.none ? advice.none.summary : advice.best.summary)} without chlorine.` : planLine].filter(Boolean),
-        note: clChem === CL_CHEM ? `Fewest ${jug} fl oz pours that reach the top of your range (${fcR.hi} ppm). Writes the dose at the current time on tap. Undo from the banner or Log.` : `${clChem} chosen because ${clChem === "Trichlor" ? "CYA" : "calcium"} is below target. Writes on tap.`,
+          latest.fc < fcR.lo ? `FC is already below ${fcR.lo} ppm.` : `Without it FC drops below ${fcR.lo} ppm by this time tomorrow.`,
+          planLine].filter(Boolean),
+        note: clChem === CL_CHEM ? `Shown when FC is below ${fcR.lo} ppm now or by this time tomorrow. Fewest ${jug} fl oz pours that reach the top of your range (${fcR.hi} ppm). Writes the dose at the current time on tap. Undo from the banner or Log.` : `${clChem} chosen because ${clChem === "Trichlor" ? "CYA" : "calcium"} is below target. Writes on tap.`,
         onLog: () => logDoseNow(clChem, clOz)
-      }) : h("div", { className: "allgood" }, `No chlorine called for: FC stays above ${fcR.lo} ppm through the ${config.chartDaysFwd || 7}-day forecast.`)),
+      }) : clQuiet),
 
     // 2. pH
     h(Card, { accent: colorOf("ph") },
@@ -115,16 +136,15 @@ export function Home({ config, latest, series, forecast, learned, effFrac, effPh
           h("span", null, phAbove ? h(React.Fragment, null, h("b", null, `Above ${forecast.phLimit} ${daysPhrase(phAbove)}`), phAbove.days > 0 ? ` (${phAbove.date})` : "") : h("b", null, `Stays at or below ${forecast ? forecast.phLimit : 7.9}`)),
           h("span", null, `outgassing toward pH ${fmt(effPhEq, 2)} · k = ${fmt(effPhK, 2)}/day`))),
       h(MiniChart, { series, pkey: "ph", color: colorOf("ph"), lo: phR.lo, hi: phR.hi, threshold: forecast ? forecast.phLimit : 7.9 }),
-      plan.acid && acEff ? h(DoseBox, {
+      showAcid && acEff ? h(DoseBox, {
         title: `Add today · ${plan.acid.chem}`, chem: plan.acid.chem, oz: acidOz, steps: plan.acid.steps, onChange: setAcidOz,
         lines: [`pH ${fmt(latest.ph, 2)} → ${fmt(acEff.ph, 2)}${acEff.ta != null ? ` · TA ${fmt(latest.ta, 0)} → ${fmt(acEff.ta, 0)}` : ""}${acEff.csiNow != null ? ` · CSI ${fmtVal("csi", latest.csi)} → ${fmtVal("csi", acEff.csiNow)}` : ""} at dosing.`,
           `Then drift brings pH to ${fmt(acEff.ph1, 2)} by this time tomorrow${acEff.csi1 != null ? ` (CSI ${fmtVal("csi", acEff.csi1)})` : ""}.`,
           phFloor != null && acEff.ph != null && acEff.ph < phFloor ? `Lands ${fmt(phFloor - acEff.ph, 2)} under the CSI floor briefly.` : null,
-          !bestAcid && advice ? `The planner would wait: ${summaryLine(advice.none ? advice.none.summary : advice.best.summary)} without acid.` : null,
           bestAcid && bestAcid.oz !== plan.acid.defaultOz && defAcidEff ? `Planner picks ${bestAcid.oz} over your usual ${plan.acid.defaultOz}: at ${plan.acid.defaultOz} fl oz pH would sit at ${fmt(defAcidEff.ph, 2)} now and ${fmt(defAcidEff.ph1, 2)} tomorrow (CSI ${fmtVal("csi", defAcidEff.csi1)}). Step up if you prefer.` : null].filter(Boolean),
         note: `Shown only while pH is above ${phR.hi}. Steps ${plan.acid.steps.join(" · ")} fl oz; ${plan.acid.steps[plan.acid.steps.length - 1]} is the cap per dose. Writes on tap.`,
         onLog: () => logDoseNow(plan.acid.chem, acidOz)
-      }) : h("div", { className: "allgood" }, latest.ph == null ? "No pH reading yet." : `No acid called for while pH is at or below ${phR.hi}.`)),
+      }) : acQuiet),
 
     // 3. CSI
     h(Card, { accent: colorOf("csi") },
@@ -133,7 +153,7 @@ export function Home({ config, latest, series, forecast, learned, effFrac, effPh
         h("div", { className: "hero-val mid" }, h("span", { style: { color: colorOf("csi") } }, fmtVal("csi", latest.csi))),
         h("div", { className: "hero-side", style: { textAlign: "left", alignItems: "flex-start" } },
           h("span", null, latest.csi == null ? "Need FC-independent inputs: pH, TA, CH, CYA and a temperature."
-            : plan.acid && acEff && acEff.csiNow != null ? `Driven by pH; ${acidOz} fl oz of acid takes it to ${fmtVal("csi", acEff.csiNow)}, back to ${fmtVal("csi", acEff.csi1)} within a day.`
+            : showAcid && acEff && acEff.csiNow != null ? `Driven by pH; ${acidOz} fl oz of acid takes it to ${fmtVal("csi", acEff.csiNow)}, back to ${fmtVal("csi", acEff.csi1)} within a day.`
             : latest.csi > csiR.hi ? "Scale-forming: lower pH or alkalinity." : latest.csi < csiR.lo ? "Corrosive: raise pH, alkalinity or calcium." : "Plaster is neither dissolving nor scaling."))),
       h("div", { className: "gauge" },
         h("div", { style: { background: C.red } }), h("div", { style: { background: C.gold } }), h("div", { style: { background: C.mint } }), h("div", { style: { background: C.gold } }), h("div", { style: { background: C.red } }),

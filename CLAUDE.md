@@ -45,12 +45,16 @@ Read `README.md` for the layout and `PROJECT.md` for the full context before cha
 ## House dosing rules (owner's; do not change without asking)
 
 - Chlorine (NaOCl 10.5 %): fewest `clStepOz` (64 fl oz) pours that put FC at or just over the
-  top of the FC range. Suggested when FC is below range or the forecast crosses the low bound
-  inside the chart window. Overshoot is accepted. Containers are 2.5 gal but the app shows fl oz.
+  top of the FC range. Called for today only when FC is below the low bound now or the model has
+  it below within 24 h (owner's change, Nov 2026); a later crossing in the chart window comes
+  back as `plan.clNext` and Home says when it will be due. Overshoot is accepted. Containers are
+  2.5 gal but the app shows fl oz.
 - Acid (31 % muriatic): only while pH is above the range high. Default `acidDefaultOz` (43),
   steps 32 · 43 · 64 plus the typed default; the largest is the per-dose cap.
 - Home "Added, log it" writes the dose immediately, stamped to the second, with an Undo toast.
 - The planner (`src/engine/planner.js`) may prefer another acid step and must say why on the card.
+- Home shows a dose box only when the house rule calls for it today AND the planner's best plan
+  includes that chemical; otherwise the card says "Nothing to add today" and gives the reason.
 
 ## UI conventions
 

@@ -167,7 +167,7 @@ export function App() {
   const forecast = useMemo(() => computeForecast({ series }), [series]);
   const exportCSV = () => exportCSVFile({ measurements, doses, series });
   const curTemp = lastTemp;
-  const plan = useMemo(() => computePlan({ latest, series, config }), [latest, series, config]);
+  const plan = useMemo(() => computePlan({ latest, series, config, effFrac }), [latest, series, config, effFrac]);
 
   // ---------- advice: the best container-sized plan over the forecast horizon ----------
   const advice = useMemo(() => computeAdvice({ latest, plan, config, effFrac, effPhK, effPhEq, phEqOverride, lastTemp }), [latest, plan, config, effFrac, effPhK, effPhEq, phEqOverride, lastTemp]);

@@ -60,13 +60,16 @@ export function summaryLine(sm) {
 export const doseLabel = d => `${d.oz} ${ADDITIVES[d.chem].unit} ${d.chem}`;
 
   // ===================== DOSING PLAN (container-sized) =====================
-  // Chlorine: NaOCl in fixed pour increments (default 64 fl oz). Suggested whenever FC is below the low bound now or the
-  // forecast crosses it inside the chart window. Overshoot inside/above range is accepted.
+  // Chlorine: NaOCl in fixed pour increments (default 64 fl oz). Called for TODAY only when FC is
+  // below the low bound now or the model has it below by this time tomorrow (owner's rule, Nov
+  // 2026). A crossing further out in the chart window comes back as `clNext` so the UI can say
+  // when it will be due. Overshoot inside/above range is accepted.
   // Acid: suggested only while pH is above the range high. Fixed container steps, hard cap.
-export function computePlan({ latest, series, config }) {
+export function computePlan({ latest, series, config, effFrac }) {
   const num = (v, d) => v === "" || v == null || isNaN(v) ? d : Number(v);
   const out = {
     cl: null,
+    clNext: null,
     acid: null,
     fcLo: num(config.fcLo, 2),
     fcHi: num(config.fcHi, 6),
@@ -78,17 +81,23 @@ export function computePlan({ latest, series, config }) {
   const jug = Math.max(1, num(config.clStepOz, 64));
   if (latest.fc != null) {
     let crossing = null;
-    if (latest.fc < out.fcLo) crossing = { days: 0, date: latest.date };
+    if (latest.fc < out.fcLo) crossing = { days: 0, hours: 0, t: latest.t, date: latest.date };
     else for (const s of series) {
       if (s._future && s.fc != null && s.fc < out.fcLo) {
-        crossing = { days: Math.max(0, Math.round((s.t - latest.t) / MS_DAY)), date: s.date };
+        crossing = { days: Math.max(0, Math.round((s.t - latest.t) / MS_DAY)), hours: Math.max(0, (s.t - latest.t) / HOUR), t: s.t, date: s.date };
         break;
       }
     }
+    // FC this time tomorrow, by the same sun-hour decay that projects "now". The forecast only
+    // samples a few times a day, so it can put a crossing just past 24 h when it is inside.
+    // Without a decay rate, fall back to the forecast points.
+    const fc24 = Number.isFinite(effFrac) ? latest.fc * Math.pow(1 - Math.max(0, Math.min(0.95, effFrac)), sunDays(latest.t, latest.t + MS_DAY, config.sunStart, config.sunEnd)) : null;
+    const dueToday = latest.fc < out.fcLo || (fc24 != null ? fc24 < out.fcLo : crossing != null && crossing.hours <= 24);
     // Dose rule: the fewest pours that put FC at or just over the top of the target range.
     const perPour = ADDITIVES[CL_CHEM].Cl * jug / V;
     const pours = Math.max(1, Math.ceil((out.fcHi - latest.fc) / perPour - 1e-9));
-    if (crossing) out.cl = { chem: CL_CHEM, step: jug, defaultOz: pours * jug, pours, perOz: ADDITIVES[CL_CHEM].Cl / V, crossing };
+    if (dueToday) out.cl = { chem: CL_CHEM, step: jug, defaultOz: pours * jug, pours, perOz: ADDITIVES[CL_CHEM].Cl / V, crossing: crossing || { days: 1, hours: 24, t: latest.t + MS_DAY, date: null } };
+    else if (crossing) out.clNext = crossing;
   }
   if (latest.ph != null && latest.ph > out.phHi) {
     const a = ADDITIVES[ACID_CHEM];

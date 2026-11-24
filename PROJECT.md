@@ -19,10 +19,12 @@ numbers against the owner's spreadsheet. The owner wants honest modeling, real c
 explicit callouts of limitations; prefer calibrating to his readings over guessing.
 
 **Dosing rules (owner's).** Chlorine: fewest 64 fl oz pours reaching the top of the FC range,
-suggested when FC is below range or the forecast crosses the low bound in the chart window;
-overshoot accepted. Acid (31 % muriatic): only while pH > range high, default 43 fl oz (typed in
+called for today only when FC is below the low bound now or within 24 h (a later crossing shows
+as the day it will be due); overshoot accepted. Acid (31 % muriatic): only while pH > range high, default 43 fl oz (typed in
 Settings), steps 32 · 43 · 64 plus the typed default; the largest step is the per-dose cap
 (64 unless a larger default is typed). Tap-to-log writes doses to the second with an undo.
+Home shows a dose box only when that rule and the planner both call for it; otherwise
+"Nothing to add today" with the reason.
 The planner (engine/planner.js) simulates container-sized plans and may prefer another acid step
 with a stated reason. No rain/dilution modeling by request.
 

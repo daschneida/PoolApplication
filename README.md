@@ -56,8 +56,10 @@ npm run check      # lint (no-undef catches missing imports), tests, build
   −0.61 pH / −9.8 ppm TA, 16 oz trichlor is −0.28, bicarb matches Henderson–Hasselbalch,
   hypochlorite leaves pH alone, equilibrium pH sits in 8.0–8.5.
 - **House dosing rules** are in `src/engine/planner.js`: chlorine is the fewest pour-steps that
-  reach the top of the FC range (default step 64 fl oz); acid only while pH is above the range
-  high, default 43 fl oz, steps 32 · 43 · 64 plus whatever default is typed, largest is the cap.
+  reach the top of the FC range (default step 64 fl oz), called for today only when FC is below
+  the low bound now or within 24 h; acid only while pH is above the range high, default 43 fl
+  oz, steps 32 · 43 · 64 plus whatever default is typed, largest is the cap. Home shows a dose
+  box only when the rule and the planner agree, and otherwise says "Nothing to add today".
   The planner simulates container-sized plans over the forecast horizon and scores squared
   distance outside the target ranges (1 ppm floor, pH and CSI weigh most; FC overshoot barely).
 - **Vendored libraries** are plain `<script>` tags, so React is a global. `src/ui/react.js` is

@@ -1253,10 +1253,11 @@ function(a,b,c){if(!Vd(b))throw Error(n(200));return Wd(null,a,b,!1,c)};Q.unmoun
     return parts.join(", ");
   }
   var doseLabel = (d) => `${d.oz} ${ADDITIVES[d.chem].unit} ${d.chem}`;
-  function computePlan({ latest, series, config }) {
+  function computePlan({ latest, series, config, effFrac }) {
     const num = (v, d) => v === "" || v == null || isNaN(v) ? d : Number(v);
     const out = {
       cl: null,
+      clNext: null,
       acid: null,
       fcLo: num(config.fcLo, 2),
       fcHi: num(config.fcHi, 6),
@@ -1268,16 +1269,19 @@ function(a,b,c){if(!Vd(b))throw Error(n(200));return Wd(null,a,b,!1,c)};Q.unmoun
     const jug = Math.max(1, num(config.clStepOz, 64));
     if (latest.fc != null) {
       let crossing = null;
-      if (latest.fc < out.fcLo) crossing = { days: 0, date: latest.date };
+      if (latest.fc < out.fcLo) crossing = { days: 0, hours: 0, t: latest.t, date: latest.date };
       else for (const s of series) {
         if (s._future && s.fc != null && s.fc < out.fcLo) {
-          crossing = { days: Math.max(0, Math.round((s.t - latest.t) / MS_DAY)), date: s.date };
+          crossing = { days: Math.max(0, Math.round((s.t - latest.t) / MS_DAY)), hours: Math.max(0, (s.t - latest.t) / HOUR), t: s.t, date: s.date };
           break;
         }
       }
+      const fc24 = Number.isFinite(effFrac) ? latest.fc * Math.pow(1 - Math.max(0, Math.min(0.95, effFrac)), sunDays(latest.t, latest.t + MS_DAY, config.sunStart, config.sunEnd)) : null;
+      const dueToday = latest.fc < out.fcLo || (fc24 != null ? fc24 < out.fcLo : crossing != null && crossing.hours <= 24);
       const perPour = ADDITIVES[CL_CHEM].Cl * jug / V;
       const pours = Math.max(1, Math.ceil((out.fcHi - latest.fc) / perPour - 1e-9));
-      if (crossing) out.cl = { chem: CL_CHEM, step: jug, defaultOz: pours * jug, pours, perOz: ADDITIVES[CL_CHEM].Cl / V, crossing };
+      if (dueToday) out.cl = { chem: CL_CHEM, step: jug, defaultOz: pours * jug, pours, perOz: ADDITIVES[CL_CHEM].Cl / V, crossing: crossing || { days: 1, hours: 24, t: latest.t + MS_DAY, date: null } };
+      else if (crossing) out.clNext = crossing;
     }
     if (latest.ph != null && latest.ph > out.phHi) {
       const a = ADDITIVES[ACID_CHEM];
@@ -1355,6 +1359,8 @@ function(a,b,c){if(!Vd(b))throw Error(n(200));return Wd(null,a,b,!1,c)};Q.unmoun
     const jug = Math.max(1, numOrDef(config.clStepOz, 64));
     const bestCl = advice ? advice.best.doses.find((d) => ADDITIVES[d.chem].Cl > 0) || null : null;
     const bestAcid = advice ? advice.best.doses.find((d) => d.chem === ACID_CHEM) || null : null;
+    const showCl = !!(plan.cl && (!advice || bestCl));
+    const showAcid = !!(plan.acid && (!advice || bestAcid));
     const clChem = bestCl ? bestCl.chem : CL_CHEM;
     const clSeed = bestCl ? bestCl.oz : plan.cl ? plan.cl.defaultOz : jug;
     const [clOz, setClOz] = useState(clSeed);
@@ -1365,7 +1371,6 @@ function(a,b,c){if(!Vd(b))throw Error(n(200));return Wd(null,a,b,!1,c)};Q.unmoun
     useEffect(() => {
       setAcidOz(bestAcid ? bestAcid.oz : plan.acid ? plan.acid.defaultOz : 43);
     }, [bestAcid && bestAcid.oz, plan.acid && plan.acid.defaultOz]);
-    const showCl = !!(plan.cl || bestCl);
     const planLine = advice ? `Planner, ${advice.days} days: ${advice.best.doses.length ? advice.best.doses.map(doseLabel).join(" + ") : "add nothing"} \u2192 ${summaryLine(advice.best.summary)}.` : null;
     if (!latest) return h(
       "div",
@@ -1414,8 +1419,15 @@ function(a,b,c){if(!Vd(b))throw Error(n(200));return Wd(null,a,b,!1,c)};Q.unmoun
     })();
     const phFloor = latest.ta != null && latest.ch != null && latest.cya != null ? phForCSI(csiR.lo, latest.ch, latest.ta, latest.cya, curTemp) : null;
     const clEff = showCl ? effectOf(clChem, clOz) : null;
-    const acEff = plan.acid ? effectOf(plan.acid.chem, acidOz) : null;
-    const defAcidEff = plan.acid && bestAcid && bestAcid.oz !== plan.acid.defaultOz ? effectOf(plan.acid.chem, plan.acid.defaultOz) : null;
+    const acEff = showAcid ? effectOf(plan.acid.chem, acidOz) : null;
+    const defAcidEff = showAcid && bestAcid && bestAcid.oz !== plan.acid.defaultOz ? effectOf(plan.acid.chem, plan.acid.defaultOz) : null;
+    const dayName = (t) => new Date(t).toLocaleDateString(void 0, { weekday: "short", month: "short", day: "numeric" });
+    const plannerSays = planLine ? ` ${planLine}` : "";
+    const quiet = (text, lead) => h("div", { className: "allgood" }, lead ? h("b", null, "Nothing to add today. ") : null, text);
+    const clQuiet = latest.fc == null ? quiet("No FC reading yet.", false) : quiet(plan.cl ? `FC ${latest.fc < fcR.lo ? `is below ${fcR.lo} ppm` : `drops below ${fcR.lo} ppm by this time tomorrow`}, but the planner would wait.${plannerSays}` : plan.clNext ? `FC stays above ${fcR.lo} ppm until about ${dayName(plan.clNext.t)} (${daysPhrase(plan.clNext)}). Home calls for a pour once that is less than a day away.` : `FC stays above ${fcR.lo} ppm through the ${config.chartDaysFwd || 7}-day forecast.`, true);
+    const waitAcidEff = plan.acid && !showAcid ? effectOf(plan.acid.chem, plan.acid.defaultOz) : null;
+    const acidWhy = !waitAcidEff ? "" : waitAcidEff.csiNow != null && waitAcidEff.csiNow < csiR.lo ? `: ${plan.acid.defaultOz} fl oz would take CSI to ${fmtVal("csi", waitAcidEff.csiNow)}, under ${fmtVal("csi", csiR.lo)}` : waitAcidEff.ph != null && waitAcidEff.ph < phR.lo ? `: ${plan.acid.defaultOz} fl oz would take pH to ${fmt(waitAcidEff.ph, 2)}, under ${phR.lo}` : "";
+    const acQuiet = latest.ph == null ? quiet("No pH reading yet.", false) : quiet(plan.acid ? `pH ${fmt(latest.ph, 2)} is above ${phR.hi}, but the planner would wait${acidWhy}.${plannerSays}` : `No acid while pH is at or below ${phR.hi}.`, true);
     const csiWord = (c) => c == null ? "need all five inputs" : c <= -0.6 ? "corrosive" : c <= -0.3 ? "slightly corrosive" : c < 0.3 ? "balanced" : c < 0.6 ? "slightly scaling" : "scaling";
     const csiChip = latest.csi == null ? { label: "no data", bg: C.g100, fg: C.ink } : latest.csi >= csiR.lo && latest.csi <= csiR.hi ? { label: "balanced", bg: C.mint, fg: C.green } : Math.abs(latest.csi) < 0.6 ? { label: csiWord(latest.csi), bg: C.gold, fg: C.ink } : { label: csiWord(latest.csi), bg: C.red, fg: C.white };
     const csiPos = latest.csi == null ? null : Math.max(2, Math.min(98, (latest.csi + 0.75) / 1.5 * 100));
@@ -1450,12 +1462,12 @@ function(a,b,c){if(!Vd(b))throw Error(n(200));return Wd(null,a,b,!1,c)};Q.unmoun
           onChange: setClOz,
           lines: [
             `${fmt(latest.fc)} \u2192 ${fmt(clEff.fc)} ppm now; about ${fmt(clEff.fc1)} ppm this time tomorrow${clChem !== CL_CHEM && clEff.cya != null && latest.cya != null && clEff.cya !== latest.cya ? ` \xB7 CYA ${fmt(latest.cya, 0)} \u2192 ${fmt(clEff.cya, 0)}` : ""}${clChem !== CL_CHEM && clEff.ch != null && latest.ch != null && clEff.ch !== latest.ch ? ` \xB7 CH ${fmt(latest.ch, 0)} \u2192 ${fmt(clEff.ch, 0)}` : ""}.`,
-            plan.cl ? plan.cl.crossing.days > 0 ? `Without it FC crosses ${fcR.lo} ppm ${daysPhrase(plan.cl.crossing)}.` : `FC is already below ${fcR.lo} ppm.` : null,
-            !bestCl ? `The planner would wait: ${summaryLine(advice.none ? advice.none.summary : advice.best.summary)} without chlorine.` : planLine
+            latest.fc < fcR.lo ? `FC is already below ${fcR.lo} ppm.` : `Without it FC drops below ${fcR.lo} ppm by this time tomorrow.`,
+            planLine
           ].filter(Boolean),
-          note: clChem === CL_CHEM ? `Fewest ${jug} fl oz pours that reach the top of your range (${fcR.hi} ppm). Writes the dose at the current time on tap. Undo from the banner or Log.` : `${clChem} chosen because ${clChem === "Trichlor" ? "CYA" : "calcium"} is below target. Writes on tap.`,
+          note: clChem === CL_CHEM ? `Shown when FC is below ${fcR.lo} ppm now or by this time tomorrow. Fewest ${jug} fl oz pours that reach the top of your range (${fcR.hi} ppm). Writes the dose at the current time on tap. Undo from the banner or Log.` : `${clChem} chosen because ${clChem === "Trichlor" ? "CYA" : "calcium"} is below target. Writes on tap.`,
           onLog: () => logDoseNow(clChem, clOz)
-        }) : h("div", { className: "allgood" }, `No chlorine called for: FC stays above ${fcR.lo} ppm through the ${config.chartDaysFwd || 7}-day forecast.`)
+        }) : clQuiet
       ),
       // 2. pH
       h(
@@ -1474,7 +1486,7 @@ function(a,b,c){if(!Vd(b))throw Error(n(200));return Wd(null,a,b,!1,c)};Q.unmoun
           )
         ),
         h(MiniChart, { series, pkey: "ph", color: colorOf("ph"), lo: phR.lo, hi: phR.hi, threshold: forecast ? forecast.phLimit : 7.9 }),
-        plan.acid && acEff ? h(DoseBox, {
+        showAcid && acEff ? h(DoseBox, {
           title: `Add today \xB7 ${plan.acid.chem}`,
           chem: plan.acid.chem,
           oz: acidOz,
@@ -1484,12 +1496,11 @@ function(a,b,c){if(!Vd(b))throw Error(n(200));return Wd(null,a,b,!1,c)};Q.unmoun
             `pH ${fmt(latest.ph, 2)} \u2192 ${fmt(acEff.ph, 2)}${acEff.ta != null ? ` \xB7 TA ${fmt(latest.ta, 0)} \u2192 ${fmt(acEff.ta, 0)}` : ""}${acEff.csiNow != null ? ` \xB7 CSI ${fmtVal("csi", latest.csi)} \u2192 ${fmtVal("csi", acEff.csiNow)}` : ""} at dosing.`,
             `Then drift brings pH to ${fmt(acEff.ph1, 2)} by this time tomorrow${acEff.csi1 != null ? ` (CSI ${fmtVal("csi", acEff.csi1)})` : ""}.`,
             phFloor != null && acEff.ph != null && acEff.ph < phFloor ? `Lands ${fmt(phFloor - acEff.ph, 2)} under the CSI floor briefly.` : null,
-            !bestAcid && advice ? `The planner would wait: ${summaryLine(advice.none ? advice.none.summary : advice.best.summary)} without acid.` : null,
             bestAcid && bestAcid.oz !== plan.acid.defaultOz && defAcidEff ? `Planner picks ${bestAcid.oz} over your usual ${plan.acid.defaultOz}: at ${plan.acid.defaultOz} fl oz pH would sit at ${fmt(defAcidEff.ph, 2)} now and ${fmt(defAcidEff.ph1, 2)} tomorrow (CSI ${fmtVal("csi", defAcidEff.csi1)}). Step up if you prefer.` : null
           ].filter(Boolean),
           note: `Shown only while pH is above ${phR.hi}. Steps ${plan.acid.steps.join(" \xB7 ")} fl oz; ${plan.acid.steps[plan.acid.steps.length - 1]} is the cap per dose. Writes on tap.`,
           onLog: () => logDoseNow(plan.acid.chem, acidOz)
-        }) : h("div", { className: "allgood" }, latest.ph == null ? "No pH reading yet." : `No acid called for while pH is at or below ${phR.hi}.`)
+        }) : acQuiet
       ),
       // 3. CSI
       h(
@@ -1503,7 +1514,7 @@ function(a,b,c){if(!Vd(b))throw Error(n(200));return Wd(null,a,b,!1,c)};Q.unmoun
           h(
             "div",
             { className: "hero-side", style: { textAlign: "left", alignItems: "flex-start" } },
-            h("span", null, latest.csi == null ? "Need FC-independent inputs: pH, TA, CH, CYA and a temperature." : plan.acid && acEff && acEff.csiNow != null ? `Driven by pH; ${acidOz} fl oz of acid takes it to ${fmtVal("csi", acEff.csiNow)}, back to ${fmtVal("csi", acEff.csi1)} within a day.` : latest.csi > csiR.hi ? "Scale-forming: lower pH or alkalinity." : latest.csi < csiR.lo ? "Corrosive: raise pH, alkalinity or calcium." : "Plaster is neither dissolving nor scaling.")
+            h("span", null, latest.csi == null ? "Need FC-independent inputs: pH, TA, CH, CYA and a temperature." : showAcid && acEff && acEff.csiNow != null ? `Driven by pH; ${acidOz} fl oz of acid takes it to ${fmtVal("csi", acEff.csiNow)}, back to ${fmtVal("csi", acEff.csi1)} within a day.` : latest.csi > csiR.hi ? "Scale-forming: lower pH or alkalinity." : latest.csi < csiR.lo ? "Corrosive: raise pH, alkalinity or calcium." : "Plaster is neither dissolving nor scaling.")
           )
         ),
         h(
@@ -3056,7 +3067,7 @@ function(a,b,c){if(!Vd(b))throw Error(n(200));return Wd(null,a,b,!1,c)};Q.unmoun
     const forecast = useMemo(() => computeForecast({ series }), [series]);
     const exportCSV2 = () => exportCSV({ measurements, doses, series });
     const curTemp = lastTemp;
-    const plan = useMemo(() => computePlan({ latest, series, config }), [latest, series, config]);
+    const plan = useMemo(() => computePlan({ latest, series, config, effFrac }), [latest, series, config, effFrac]);
     const advice = useMemo(() => computeAdvice({ latest, plan, config, effFrac, effPhK, effPhEq, phEqOverride, lastTemp }), [latest, plan, config, effFrac, effPhK, effPhEq, phEqOverride, lastTemp]);
     const [toast, setToast] = useState(null);
     useEffect(() => {
