@@ -819,8 +819,9 @@ function(a,b,c){if(!Vd(b))throw Error(n(200));return Wd(null,a,b,!1,c)};Q.unmoun
     "Good chemistry is just patience with numbers attached.",
     "Sparkle is a lagging indicator. Readings are a leading one."
   ];
+  var SPLASH_LINE = SPLASH_LINES[Math.floor(Math.random() * SPLASH_LINES.length)];
   function Splash({ out, name }) {
-    const [line] = useState(() => SPLASH_LINES[Math.floor(Math.random() * SPLASH_LINES.length)]);
+    const line = SPLASH_LINE;
     const hr = (/* @__PURE__ */ new Date()).getHours();
     const hi = hr < 5 ? "Up late?" : hr < 12 ? "Good morning." : hr < 17 ? "Good afternoon." : "Good evening.";
     return h(
@@ -2926,6 +2927,8 @@ function(a,b,c){if(!Vd(b))throw Error(n(200));return Wd(null,a,b,!1,c)};Q.unmoun
   };
 
   // src/ui/app.js
+  var SPLASH_MIN_MS = 3e3;
+  var SPLASH_FADE_MS = 500;
   function App() {
     const [config, setConfig] = useState({
       name: "Houston Pool",
@@ -3086,11 +3089,13 @@ function(a,b,c){if(!Vd(b))throw Error(n(200));return Wd(null,a,b,!1,c)};Q.unmoun
       return { fc: n.fc, ph: n.ph, ta: n.ta, ch: n.ch, cya: n.cya, csiNow, ph1, fc1, csi1 };
     };
     const lastMeasTs = measurements.length ? Math.max(...measurements.map(tsOf)) : null;
+    const [splashStart] = useState(() => Date.now());
     const [splash, setSplash] = useState({ show: true, out: false });
     useEffect(() => {
       if (!loaded) return;
-      const a = setTimeout(() => setSplash({ show: true, out: true }), 1400);
-      const b = setTimeout(() => setSplash({ show: false, out: true }), 1900);
+      const hold = Math.max(0, splashStart + SPLASH_MIN_MS - Date.now());
+      const a = setTimeout(() => setSplash({ show: true, out: true }), hold);
+      const b = setTimeout(() => setSplash({ show: false, out: true }), hold + SPLASH_FADE_MS);
       return () => {
         clearTimeout(a);
         clearTimeout(b);
