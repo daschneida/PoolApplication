@@ -1,4 +1,4 @@
-import { h, useState } from "./react.js";
+import { h } from "./react.js";
 import { C } from "./theme.js";
 import { fmtDT } from "../util.js";
 
@@ -62,8 +62,12 @@ export const SPLASH_LINES = [
   "Good chemistry is just patience with numbers attached.",
   "Sparkle is a lagging indicator. Readings are a leading one."
 ];
+// Picked once per page load. App renders the splash in two places (alone while loading, then
+// as an overlay on the app while it fades), so React mounts it twice; a per-mount pick would
+// swap the message halfway through.
+const SPLASH_LINE = SPLASH_LINES[Math.floor(Math.random() * SPLASH_LINES.length)];
 export function Splash({ out, name }) {
-  const [line] = useState(() => SPLASH_LINES[Math.floor(Math.random() * SPLASH_LINES.length)]);
+  const line = SPLASH_LINE;
   const hr = new Date().getHours();
   const hi = hr < 5 ? "Up late?" : hr < 12 ? "Good morning." : hr < 17 ? "Good afternoon." : "Good evening.";
   return h("div", { className: "splash" + (out ? " splash-out" : ""), "aria-hidden": out ? "true" : undefined },

@@ -18,6 +18,10 @@ import { exportCSV as exportCSVFile } from "../export.js";
 import { LS_KEY, SYNC_ON, sbLoad, sbSave } from "../sync.js";
 import SEED from "../../data/seed.json";
 
+// Long enough to read the longest splash line (about 14 words) once.
+const SPLASH_MIN_MS = 3000;
+const SPLASH_FADE_MS = 500;
+
 export function App() {
   const [config, setConfig] = useState({
     name: "Houston Pool",
@@ -205,12 +209,15 @@ export function App() {
 
   const lastMeasTs = measurements.length ? Math.max(...measurements.map(tsOf)) : null;
 
-  // Splash: shown while loading and for a moment after, then fades out.
+  // Splash: one message, held for SPLASH_MIN_MS from first paint (longer if loading takes
+  // longer), then fades out over SPLASH_FADE_MS (matches the .splash opacity transition).
+  const [splashStart] = useState(() => Date.now());
   const [splash, setSplash] = useState({ show: true, out: false });
   useEffect(() => {
     if (!loaded) return;
-    const a = setTimeout(() => setSplash({ show: true, out: true }), 1400);
-    const b = setTimeout(() => setSplash({ show: false, out: true }), 1900);
+    const hold = Math.max(0, splashStart + SPLASH_MIN_MS - Date.now());
+    const a = setTimeout(() => setSplash({ show: true, out: true }), hold);
+    const b = setTimeout(() => setSplash({ show: false, out: true }), hold + SPLASH_FADE_MS);
     return () => { clearTimeout(a); clearTimeout(b); };
   }, [loaded]);
   if (!loaded) return h(Splash, { out: false, name: config.name });
